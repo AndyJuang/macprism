@@ -72,6 +72,7 @@ struct ContentView: View {
     private var memorySection: some View {
         StatCard(title: "記憶體", icon: "memorychip") {
             VStack(alignment: .leading, spacing: 6) {
+                let ratio = Double(monitor.memoryUsed) / Double(max(1, monitor.memoryTotal))
                 HStack {
                     Text(formatBytes(monitor.memoryUsed))
                         .font(.caption)
@@ -84,15 +85,13 @@ struct ContentView: View {
                         .foregroundColor(.secondary)
                         .monospacedDigit()
                     Spacer()
-                    let ratio = Double(monitor.memoryUsed) / Double(max(1, monitor.memoryTotal))
                     Text(String(format: "%.0f%%", ratio * 100))
                         .font(.caption)
                         .foregroundColor(ratioColor(ratio))
                         .monospacedDigit()
                 }
-                ProgressView(value: Double(monitor.memoryUsed),
-                             total: Double(max(1, monitor.memoryTotal)))
-                    .tint(ratioColor(Double(monitor.memoryUsed) / Double(max(1, monitor.memoryTotal))))
+                ProgressView(value: ratio, total: 1.0)
+                    .tint(ratioColor(ratio))
 
                 HStack(spacing: 12) {
                     MemLabel(color: .blue,   label: "Active",     value: formatBytes(monitor.memoryActive))

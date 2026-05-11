@@ -9,11 +9,8 @@ class StatusBarController: NSObject, NSMenuDelegate {
     private var timer: Timer?
     private var eventMonitor: Any?
 
-    // 固定寬度：足以容納 "CPU 100%  99.9G  ↑999.9M  ↓999.9M"
-    private static let itemWidth: CGFloat = 252
-
     override init() {
-        statusItem = NSStatusBar.system.statusItem(withLength: StatusBarController.itemWidth)
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         popover    = NSPopover()
         monitor    = SystemMonitor()
         super.init()
@@ -54,19 +51,11 @@ class StatusBarController: NSObject, NSMenuDelegate {
     }
 
     private func refreshStatusBar() {
-        // 每個欄位固定字元數，配合等寬字型不會跳動
-        // CPU: 4 chars (%3.0f%%) → " 45%" / "100%"
-        // Mem: 6 chars           → " 8.0G" / "512M "
-        // Speed: 6 chars each   → " 1.2M" / "  512K"
         let cpu = String(format: "%3.0f%%", monitor.cpuUsage)
         let mem = shortBytes(monitor.memoryUsed)
         let up  = shortSpeed(monitor.networkUpload)
         let dn  = shortSpeed(monitor.networkDownload)
-
-        let title = "CPU \(cpu)  \(mem)  ↑\(up)  ↓\(dn)"
-        DispatchQueue.main.async { [weak self] in
-            self?.statusItem.button?.title = title
-        }
+        statusItem.button?.title = "\(cpu) \(mem) ↑\(up) ↓\(dn)"
     }
 
     @objc private func handleClick(_ sender: NSStatusBarButton) {
@@ -133,17 +122,17 @@ class StatusBarController: NSObject, NSMenuDelegate {
         NSApplication.shared.terminate(nil)
     }
 
-    // 固定 5 字元：" 8.0G" / "32.0G" / " 512M"
+    // 4 字元：" 8G" / "32G" / "512M"
     private func shortBytes(_ bytes: UInt64) -> String {
         let gb = Double(bytes) / 1_073_741_824
-        if gb >= 1 { return String(format: "%4.1fG", gb) }
-        return String(format: "%4.0fM", Double(bytes) / 1_048_576)
+        if gb >= 1 { return String(format: "%3.0fG", gb) }
+        return String(format: "%3.0fM", Double(bytes) / 1_048_576)
     }
 
-    // 固定 6 字元：" 1.2M" / "  512K" / "   0B"
+    // 4 字元：" 1M" / "512K" / "  0B"
     private func shortSpeed(_ bps: Double) -> String {
-        if bps >= 1_048_576 { return String(format: "%5.1fM", bps / 1_048_576) }
-        if bps >= 1_024     { return String(format: "%5.0fK", bps / 1_024) }
-        return String(format: "%5.0fB", bps)
+        if bps >= 1_048_576 { return String(format: "%3.0fM", bps / 1_048_576) }
+        if bps >= 1_024     { return String(format: "%3.0fK", bps / 1_024) }
+        return String(format: "%3.0fB", bps)
     }
 }

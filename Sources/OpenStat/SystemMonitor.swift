@@ -75,11 +75,8 @@ class SystemMonitor: ObservableObject {
 
         let overall = totalAll > 0 ? totalUsed / totalAll * 100 : 0
 
-        DispatchQueue.main.async {
-            self.cpuUsage = overall
-            self.cpuCores = cores
-        }
-
+        cpuUsage = overall
+        cpuCores = cores
         previousCPUTicks = current
     }
 
@@ -102,12 +99,10 @@ class SystemMonitor: ObservableObject {
         let compressed = UInt64(stats.compressor_page_count) * page
         let used       = active + wired + compressed
 
-        DispatchQueue.main.async {
-            self.memoryUsed       = used
-            self.memoryActive     = active
-            self.memoryWired      = wired
-            self.memoryCompressed = compressed
-        }
+        memoryUsed       = used
+        memoryActive     = active
+        memoryWired      = wired
+        memoryCompressed = compressed
     }
 
     private func updateNetwork() {
@@ -120,10 +115,8 @@ class SystemMonitor: ObservableObject {
             let downDelta = stats.bytesIn  >= previousBytesIn  ? stats.bytesIn  - previousBytesIn  : 0
             let upDelta   = stats.bytesOut >= previousBytesOut ? stats.bytesOut - previousBytesOut : 0
 
-            DispatchQueue.main.async {
-                self.networkDownload = Double(downDelta) / elapsed
-                self.networkUpload   = Double(upDelta)   / elapsed
-            }
+            networkDownload = Double(downDelta) / elapsed
+            networkUpload   = Double(upDelta)   / elapsed
         }
 
         previousBytesIn  = stats.bytesIn
