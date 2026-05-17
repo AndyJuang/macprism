@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @ObservedObject var monitor: SystemMonitor
+    @ObservedObject var settings: AppSettings
     @State private var topMode: TopMode = .cpu
 
     enum TopMode: String, CaseIterable { case cpu = "CPU", memory = "記憶體" }
@@ -12,18 +13,34 @@ struct ContentView: View {
             Divider()
             ScrollView {
                 VStack(spacing: 10) {
-                    cpuSection
-                    memorySection
-                    if monitor.gpuAvailable { gpuSection }
-                    networkSection
-                    diskSection
-                    if monitor.battery.present { batterySection }
-                    topProcessSection
+                    if settings.panelItems.contains(.cpu)     { cpuSection }
+                    if settings.panelItems.contains(.memory)  { memorySection }
+                    if settings.panelItems.contains(.gpu) && monitor.gpuAvailable { gpuSection }
+                    if settings.panelItems.contains(.network) { networkSection }
+                    if settings.panelItems.contains(.disk)    { diskSection }
+                    if settings.panelItems.contains(.battery) && monitor.battery.present { batterySection }
+                    if settings.panelItems.contains(.topProcess) { topProcessSection }
+                    if settings.panelItems.isEmpty { emptyState }
                 }
                 .padding(12)
             }
         }
         .frame(width: 320, height: 520)
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "slider.horizontal.3")
+                .font(.largeTitle)
+                .foregroundColor(.secondary)
+            Text("尚未選擇任何顯示項目")
+                .font(.subheadline)
+            Text("右鍵 menu bar → 設定…")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 40)
     }
 
     // MARK: - Header
@@ -258,10 +275,12 @@ struct ContentView: View {
     private func batteryStateText(_ b: BatterySnapshot) -> String {
         if b.isCharging {
             if b.timeToFullMin > 0 { return "充電中 · 剩 \(formatMin(b.timeToFullMin))" }
+            if let est = b.estimatedTimeToFullMin { return "充電中 · 約 \(formatMin(est))（估算）" }
             return "充電中"
         }
         if b.isPluggedIn { return "已接電源" }
         if b.timeToEmptyMin > 0 { return "剩 \(formatMin(b.timeToEmptyMin))" }
+        if let est = b.estimatedTimeToEmptyMin { return "約 \(formatMin(est))（估算）" }
         return "使用電池"
     }
 
