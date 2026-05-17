@@ -1,13 +1,17 @@
 import AppKit
 import SwiftUI
 import ServiceManagement
+import Combine
 
 class StatusBarController: NSObject, NSMenuDelegate {
     private var statusItem: NSStatusItem
     private var popover: NSPopover
     private let monitor: SystemMonitor
+    private let settings = AppSettings.shared
     private var timer: Timer?
     private var eventMonitor: Any?
+    private var settingsWindow: SettingsWindowController?
+    private var cancellables: Set<AnyCancellable> = []
 
     override init() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -18,20 +22,20 @@ class StatusBarController: NSObject, NSMenuDelegate {
         setupButton()
         setupPopover()
         startMonitoring()
+        observeSettings()
     }
 
     private func setupButton() {
         guard let button = statusItem.button else { return }
         button.font      = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
         button.alignment = .center
-        // 同時接收左鍵與右鍵事件
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         button.action = #selector(handleClick)
         button.target = self
     }
 
     private func setupPopover() {
-        let content = NSHostingController(rootView: ContentView(monitor: monitor))
+        let content = NSHostingController(rootView: ContentView(monitor: monitor, settings: settings))
         content.view.frame = NSRect(x: 0, y: 0, width: 320, height: 520)
 
         popover.contentViewController = content
@@ -50,46 +54,47 @@ class StatusBarController: NSObject, NSMenuDelegate {
         }
     }
 
-    private func refreshStatusBar() {
-        let cpu = String(format: "%3.0f%%", monitor.cpuUsage)
-        let mem = shortBytes(monitor.memoryUsed)
-        let up  = shortSpeed(monitor.networkUpload)
-        let dn  = shortSpeed(monitor.networkDownload)
+    /// 設定改動時即時刷新 menu bar
+    private func observeSettings() {
+        settings.$menuBarItems
+            .dropFirst()
+            .sink { [weak self] _ in self?.refreshStatusBar() }
+            .store(in: &cancellables)
+    }
 
-        var parts = [cpu]
-        if showGPU && monitor.gpuAvailable {
+    private func refreshStatusBar() {
+        let items = settings.menuBarItems
+        var parts: [String] = []
+
+        if items.contains(.cpu) {
+            parts.append(String(format: "%3.0f%%", monitor.cpuUsage))
+        }
+        if items.contains(.gpu) && monitor.gpuAvailable {
             parts.append("G" + String(format: "%2.0f%%", monitor.gpuUsage))
         }
-        parts.append(mem)
-        if showDiskIO {
+        if items.contains(.memory) {
+            parts.append(shortBytes(monitor.memoryUsed))
+        }
+        if items.contains(.disk) {
             parts.append("D↑\(shortSpeed(monitor.diskWriteRate))")
             parts.append("D↓\(shortSpeed(monitor.diskReadRate))")
         }
-        parts.append("↑\(up)")
-        parts.append("↓\(dn)")
-        if showBattery && monitor.battery.present {
+        if items.contains(.network) {
+            parts.append("↑\(shortSpeed(monitor.networkUpload))")
+            parts.append("↓\(shortSpeed(monitor.networkDownload))")
+        }
+        if items.contains(.battery) && monitor.battery.present {
             parts.append("\(monitor.battery.percent)%" + (monitor.battery.isCharging ? "⚡" : ""))
         }
-        statusItem.button?.title = parts.joined(separator: " ")
-    }
 
-    // MARK: - 顯示偏好（持久化）
-
-    private let kShowGPU     = "openstat.menubar.showGPU"
-    private let kShowDiskIO  = "openstat.menubar.showDiskIO"
-    private let kShowBattery = "openstat.menubar.showBattery"
-
-    private var showGPU: Bool {
-        get { UserDefaults.standard.object(forKey: kShowGPU) as? Bool ?? true }
-        set { UserDefaults.standard.set(newValue, forKey: kShowGPU) }
-    }
-    private var showDiskIO: Bool {
-        get { UserDefaults.standard.object(forKey: kShowDiskIO) as? Bool ?? false }
-        set { UserDefaults.standard.set(newValue, forKey: kShowDiskIO) }
-    }
-    private var showBattery: Bool {
-        get { UserDefaults.standard.object(forKey: kShowBattery) as? Bool ?? true }
-        set { UserDefaults.standard.set(newValue, forKey: kShowBattery) }
+        // 全部關閉時退回顯示圖示，避免 menu bar 變空白
+        if parts.isEmpty {
+            statusItem.button?.image = NSImage(systemSymbolName: "gauge.medium", accessibilityDescription: "OpenStat")
+            statusItem.button?.title = ""
+        } else {
+            statusItem.button?.image = nil
+            statusItem.button?.title = parts.joined(separator: " ")
+        }
     }
 
     @objc private func handleClick(_ sender: NSStatusBarButton) {
@@ -118,19 +123,13 @@ class StatusBarController: NSObject, NSMenuDelegate {
     private func showContextMenu() {
         let menu = NSMenu()
 
-        // 顯示項目子選單
-        let displayMenu = NSMenu()
-        addToggle(menu: displayMenu, title: "GPU 使用率",  selector: #selector(toggleGPU),     on: showGPU)
-        addToggle(menu: displayMenu, title: "磁碟讀寫速率", selector: #selector(toggleDiskIO),  on: showDiskIO)
-        addToggle(menu: displayMenu, title: "電池電量",    selector: #selector(toggleBattery), on: showBattery)
-
-        let displayItem = NSMenuItem(title: "Menu Bar 顯示", action: nil, keyEquivalent: "")
-        displayItem.submenu = displayMenu
-        menu.addItem(displayItem)
+        let prefs = NSMenuItem(title: "設定…", action: #selector(openSettings), keyEquivalent: ",")
+        prefs.target = self
+        menu.addItem(prefs)
 
         menu.addItem(.separator())
 
-        let loginItem  = NSMenuItem(title: "登入時自動啟動", action: #selector(toggleLoginItem), keyEquivalent: "")
+        let loginItem = NSMenuItem(title: "登入時自動啟動", action: #selector(toggleLoginItem), keyEquivalent: "")
         loginItem.target = self
         loginItem.state  = (SMAppService.mainApp.status == .enabled) ? .on : .off
         menu.addItem(loginItem)
@@ -143,20 +142,15 @@ class StatusBarController: NSObject, NSMenuDelegate {
         statusItem.button?.performClick(nil)
     }
 
-    private func addToggle(menu: NSMenu, title: String, selector: Selector, on: Bool) {
-        let item = NSMenuItem(title: title, action: selector, keyEquivalent: "")
-        item.target = self
-        item.state  = on ? .on : .off
-        menu.addItem(item)
+    func menuDidClose(_ menu: NSMenu) {
+        statusItem.menu = nil
     }
 
-    @objc private func toggleGPU()     { showGPU     = !showGPU;     refreshStatusBar() }
-    @objc private func toggleDiskIO()  { showDiskIO  = !showDiskIO;  refreshStatusBar() }
-    @objc private func toggleBattery() { showBattery = !showBattery; refreshStatusBar() }
-
-    func menuDidClose(_ menu: NSMenu) {
-        // 還原 nil，讓左鍵繼續顯示 popover
-        statusItem.menu = nil
+    @objc private func openSettings() {
+        if settingsWindow == nil {
+            settingsWindow = SettingsWindowController(settings: settings)
+        }
+        settingsWindow?.show()
     }
 
     @objc private func toggleLoginItem() {
@@ -178,14 +172,13 @@ class StatusBarController: NSObject, NSMenuDelegate {
         NSApplication.shared.terminate(nil)
     }
 
-    // 4 字元：" 8G" / "32G" / "512M"
+    // 4 字元
     private func shortBytes(_ bytes: UInt64) -> String {
         let gb = Double(bytes) / 1_073_741_824
         if gb >= 1 { return String(format: "%3.0fG", gb) }
         return String(format: "%3.0fM", Double(bytes) / 1_048_576)
     }
 
-    // 4 字元：" 1M" / "512K" / "  0B"
     private func shortSpeed(_ bps: Double) -> String {
         if bps >= 1_048_576 { return String(format: "%3.0fM", bps / 1_048_576) }
         if bps >= 1_024     { return String(format: "%3.0fK", bps / 1_024) }

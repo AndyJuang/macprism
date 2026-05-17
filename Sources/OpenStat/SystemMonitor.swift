@@ -16,10 +16,30 @@ struct BatterySnapshot {
     let percent: Int
     let isCharging: Bool
     let isPluggedIn: Bool
-    let timeToEmptyMin: Int   // -1 = N/A
+    let timeToEmptyMin: Int   // -1 = N/A（系統計算中）
     let timeToFullMin: Int    // -1 = N/A
     let powerWatts: Double
     let cycleCount: Int
+    let currentCapacityWh: Double
+    let maxCapacityWh: Double
+
+    /// 系統值不可用時，用剩餘電量 ÷ 瞬時功率估算放電剩餘分鐘。回傳 nil 表示無法估算。
+    var estimatedTimeToEmptyMin: Int? {
+        guard powerWatts > 0.1, currentCapacityWh > 0 else { return nil }
+        let hours = currentCapacityWh / powerWatts
+        let m = Int((hours * 60).rounded())
+        return m > 0 ? m : nil
+    }
+
+    /// 充電時的剩餘時間估算（用「滿充 − 當前」÷ 功率）
+    var estimatedTimeToFullMin: Int? {
+        guard powerWatts > 0.1,
+              maxCapacityWh > currentCapacityWh,
+              currentCapacityWh > 0 else { return nil }
+        let hours = (maxCapacityWh - currentCapacityWh) / powerWatts
+        let m = Int((hours * 60).rounded())
+        return m > 0 ? m : nil
+    }
 }
 
 struct ProcessRow: Identifiable {
@@ -53,7 +73,8 @@ class SystemMonitor: ObservableObject {
     // 電池
     @Published var battery: BatterySnapshot = BatterySnapshot(
         present: false, percent: 0, isCharging: false, isPluggedIn: false,
-        timeToEmptyMin: -1, timeToFullMin: -1, powerWatts: 0, cycleCount: 0)
+        timeToEmptyMin: -1, timeToFullMin: -1, powerWatts: 0, cycleCount: 0,
+        currentCapacityWh: 0, maxCapacityWh: 0)
 
     // Top Process
     @Published var topByCPU: [ProcessRow] = []
@@ -250,7 +271,9 @@ class SystemMonitor: ObservableObject {
             timeToEmptyMin: Int(b.timeToEmptyMin),
             timeToFullMin: Int(b.timeToFullMin),
             powerWatts: b.powerWatts,
-            cycleCount: Int(b.cycleCount)
+            cycleCount: Int(b.cycleCount),
+            currentCapacityWh: b.currentCapacityWh,
+            maxCapacityWh: b.maxCapacityWh
         )
     }
 
