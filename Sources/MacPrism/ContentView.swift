@@ -67,6 +67,9 @@ struct ContentView: View {
                 .foregroundColor(.accentColor)
             Text("MacPrism")
                 .font(.headline)
+                .foregroundStyle(theme == .rainbow
+                    ? AnyShapeStyle(ColorTheme.prismGradient)
+                    : AnyShapeStyle(Color.primary))
             Spacer()
             Button("結束") { NSApplication.shared.terminate(nil) }
                 .buttonStyle(.plain)
@@ -92,11 +95,11 @@ struct ContentView: View {
                         .foregroundColor(usageColor(monitor.cpuUsage, high: 80, mid: 50))
                         .monospacedDigit()
                 }
-                ProgressView(value: monitor.cpuUsage, total: 100)
-                    .tint(usageColor(monitor.cpuUsage, high: 80, mid: 50))
+                MetricBar(value: monitor.cpuUsage / 100,
+                          fill: usageFill(monitor.cpuUsage, high: 80, mid: 50))
 
                 Sparkline(values: monitor.cpuHistory,
-                          color: usageColor(monitor.cpuUsage, high: 80, mid: 50),
+                          fill: usageFill(monitor.cpuUsage, high: 80, mid: 50),
                           maxValue: 100, unit: "%")
                     .frame(height: 36)
 
@@ -104,7 +107,7 @@ struct ContentView: View {
                     let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 4)
                     LazyVGrid(columns: columns, spacing: 4) {
                         ForEach(Array(monitor.cpuCores.enumerated()), id: \.offset) { i, usage in
-                            CoreBar(index: i + 1, usage: usage)
+                            CoreBar(index: i + 1, usage: usage, theme: theme)
                         }
                     }
                 }
@@ -141,10 +144,9 @@ struct ContentView: View {
                         .foregroundColor(ratioColor(ratio))
                         .monospacedDigit()
                 }
-                ProgressView(value: ratio, total: 1.0)
-                    .tint(ratioColor(ratio))
+                MetricBar(value: ratio, fill: ratioFill(ratio))
 
-                Sparkline(values: monitor.memHistory, color: ratioColor(ratio),
+                Sparkline(values: monitor.memHistory, fill: ratioFill(ratio),
                           maxValue: 100, unit: "%")
                     .frame(height: 36)
 
@@ -177,7 +179,7 @@ struct ContentView: View {
                             value: formatSpeed(monitor.networkDownload),
                             color: .cyan)
                 }
-                Sparkline(values: monitor.netDownHistory, color: .cyan)
+                Sparkline(values: monitor.netDownHistory, fill: theme.accentFill(.cyan))
                     .frame(height: 36)
 
                 InfoRow(label: "區域 IP", value: networkMonitor.localIP)
@@ -243,10 +245,10 @@ struct ContentView: View {
                         .foregroundColor(usageColor(monitor.gpuUsage, high: 80, mid: 50))
                         .monospacedDigit()
                 }
-                ProgressView(value: min(monitor.gpuUsage, 100), total: 100)
-                    .tint(usageColor(monitor.gpuUsage, high: 80, mid: 50))
+                MetricBar(value: min(monitor.gpuUsage, 100) / 100,
+                          fill: usageFill(monitor.gpuUsage, high: 80, mid: 50))
                 Sparkline(values: monitor.gpuHistory,
-                          color: usageColor(monitor.gpuUsage, high: 80, mid: 50),
+                          fill: usageFill(monitor.gpuUsage, high: 80, mid: 50),
                           maxValue: 100, unit: "%")
                     .frame(height: 36)
                 if monitor.gpuMemoryMB > 0 {
@@ -275,7 +277,7 @@ struct ContentView: View {
                             value: formatSpeed(monitor.diskReadRate),  color: .teal)
                 }
                 ForEach(monitor.volumes.prefix(3)) { vol in
-                    VolumeRow(vol: vol, ratioColor: ratioColor)
+                    VolumeRow(vol: vol, theme: theme)
                 }
             }
         }
@@ -296,8 +298,8 @@ struct ContentView: View {
                         .font(.system(size: 13))
                         .foregroundColor(.secondary)
                 }
-                ProgressView(value: Double(monitor.battery.percent), total: 100)
-                    .tint(batteryColor(monitor.battery))
+                MetricBar(value: Double(monitor.battery.percent) / 100,
+                          fill: batteryFill(monitor.battery))
                 HStack(spacing: 12) {
                     if monitor.battery.powerWatts > 0 {
                         MemLabel(color: .yellow, label: "功率",
@@ -450,29 +452,34 @@ struct ContentView: View {
                 Text("目前 5 小時視窗剩餘額度")
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
-                CLIUsageRow(usage: tokenMonitor.claude)
+                CLIUsageRow(usage: tokenMonitor.claude, theme: theme)
                 Divider()
-                CLIUsageRow(usage: tokenMonitor.codex)
+                CLIUsageRow(usage: tokenMonitor.codex, theme: theme)
             }
         }
     }
 
     // MARK: - Helpers
 
+    private var theme: ColorTheme { settings.colorTheme }
+
     private func usageColor(_ v: Double, high: Double, mid: Double) -> Color {
-        v > high ? .red : v > mid ? .orange : .green
+        theme.color(usageSeverity(v, high: high, mid: mid))
+    }
+    private func usageFill(_ v: Double, high: Double, mid: Double) -> AnyShapeStyle {
+        theme.fill(usageSeverity(v, high: high, mid: mid))
     }
 
-    private func ratioColor(_ r: Double) -> Color {
-        r > 0.9 ? .red : r > 0.7 ? .orange : .blue
-    }
+    private func ratioColor(_ r: Double) -> Color { theme.color(ratioSeverity(r)) }
+    private func ratioFill(_ r: Double) -> AnyShapeStyle { theme.fill(ratioSeverity(r)) }
 
-    private func batteryColor(_ b: BatterySnapshot) -> Color {
-        if b.isCharging || b.isPluggedIn { return .green }
-        if b.percent <= 10 { return .red }
-        if b.percent <= 20 { return .orange }
-        return .blue
+    private func batterySeverity(_ b: BatterySnapshot) -> Severity {
+        if b.percent <= 10 { return .high }
+        if b.percent <= 20 { return .warn }
+        return .ok
     }
+    private func batteryColor(_ b: BatterySnapshot) -> Color { theme.color(batterySeverity(b)) }
+    private func batteryFill(_ b: BatterySnapshot) -> AnyShapeStyle { theme.fill(batterySeverity(b)) }
 
     private func batteryIcon(_ b: BatterySnapshot) -> String {
         if b.isCharging { return "battery.100.bolt" }
@@ -505,11 +512,11 @@ struct ContentView: View {
     // MARK: - 感測器 / 系統輔助
 
     private func tempColor(_ celsius: Double) -> Color {
-        celsius >= 85 ? .red : celsius >= 70 ? .orange : .green
+        theme.color(celsius >= 85 ? .high : celsius >= 70 ? .warn : .ok)
     }
 
     private func healthColor(_ percent: Int) -> Color {
-        percent < 80 ? .orange : .green
+        theme.color(percent < 80 ? .warn : .ok)
     }
 
     private var loadAvgText: String {
@@ -538,9 +545,9 @@ struct ContentView: View {
 
     private var pressureColor: Color {
         switch monitor.memoryPressureLevel {
-        case 4:  return .red
-        case 2:  return .orange
-        default: return .green
+        case 4:  return theme.color(.high)
+        case 2:  return theme.color(.warn)
+        default: return theme.color(.ok)
         }
     }
 }
@@ -549,11 +556,11 @@ struct ContentView: View {
 
 struct VolumeRow: View {
     let vol: VolumeUsage
-    let ratioColor: (Double) -> Color
+    let theme: ColorTheme
 
     var body: some View {
         HStack(spacing: 10) {
-            DonutRing(ratio: vol.ratio, color: ratioColor(vol.ratio))
+            DonutRing(ratio: vol.ratio, fill: theme.fill(ratioSeverity(vol.ratio)))
                 .frame(width: 46, height: 46)
             VStack(alignment: .leading, spacing: 2) {
                 Text(vol.name.isEmpty ? vol.id : vol.name)
@@ -579,7 +586,7 @@ struct VolumeRow: View {
 /// 甜甜圈圓環，中央顯示百分比
 struct DonutRing: View {
     let ratio: Double
-    let color: Color
+    let fill: AnyShapeStyle
 
     var body: some View {
         ZStack {
@@ -587,7 +594,7 @@ struct DonutRing: View {
                 .stroke(Color.primary.opacity(0.1), lineWidth: 5)
             Circle()
                 .trim(from: 0, to: CGFloat(min(max(ratio, 0), 1)))
-                .stroke(color, style: StrokeStyle(lineWidth: 5, lineCap: .round))
+                .stroke(fill, style: StrokeStyle(lineWidth: 5, lineCap: .round))
                 .rotationEffect(.degrees(-90))
             Text("\(Int((ratio * 100).rounded()))%")
                 .font(.system(size: 11, weight: .semibold))
@@ -625,6 +632,7 @@ struct ProcessRowView: View {
 /// 單一 AI CLI 的配額列：名稱、剩餘百分比、進度條、重置倒數
 struct CLIUsageRow: View {
     let usage: CLIUsage
+    let theme: ColorTheme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -645,8 +653,7 @@ struct CLIUsageRow: View {
                 }
             }
             if usage.available {
-                ProgressView(value: min(usage.usedPercent, 100), total: 100)
-                    .tint(remainColor)
+                MetricBar(value: min(usage.usedPercent, 100) / 100, fill: remainFill)
                 HStack {
                     Text(resetText)
                         .font(.system(size: 11))
@@ -666,11 +673,13 @@ struct CLIUsageRow: View {
         }
     }
 
-    /// 剩餘越少越紅
-    private var remainColor: Color {
+    /// 剩餘越少越嚴重
+    private var remainSeverity: Severity {
         let r = usage.remainingPercent
-        return r < 15 ? .red : r < 40 ? .orange : .green
+        return r < 15 ? .high : r < 40 ? .warn : .ok
     }
+    private var remainColor: Color { theme.color(remainSeverity) }
+    private var remainFill: AnyShapeStyle { theme.fill(remainSeverity) }
 
     private var resetText: String {
         guard let minutes = usage.minutesToReset else { return "重置時間未知" }
@@ -739,10 +748,37 @@ struct MonthCalendarView: View {
     }
 }
 
+// MARK: - 嚴重程度判定
+
+func usageSeverity(_ v: Double, high: Double, mid: Double) -> Severity {
+    v > high ? .high : v > mid ? .warn : .ok
+}
+
+func ratioSeverity(_ r: Double) -> Severity {
+    r > 0.9 ? .high : r > 0.7 ? .warn : .ok
+}
+
+/// 進度條 —— 支援純色或彩虹漸層填色
+struct MetricBar: View {
+    let value: Double            // 0...1
+    let fill: AnyShapeStyle
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.primary.opacity(0.1))
+                Capsule().fill(fill)
+                    .frame(width: geo.size.width * min(max(value, 0), 1))
+            }
+        }
+        .frame(height: 6)
+    }
+}
+
 /// 迷你走勢圖（折線）—— 含格線與 Y 軸刻度
 struct Sparkline: View {
     let values: [Double]
-    let color: Color
+    let fill: AnyShapeStyle
     var maxValue: Double? = nil   // nil = 依資料自動縮放（網路）；給值 = 固定上限（CPU/GPU 100）
     var unit: String = ""
 
@@ -788,7 +824,7 @@ struct Sparkline: View {
                                 else      { path.addLine(to: CGPoint(x: x, y: y)) }
                             }
                         }
-                        .stroke(color, style: StrokeStyle(lineWidth: 1.5, lineJoin: .round))
+                        .stroke(fill, style: StrokeStyle(lineWidth: 1.5, lineJoin: .round))
                     }
                 }
             }
@@ -853,10 +889,7 @@ struct StatCard<Content: View>: View {
 struct CoreBar: View {
     let index: Int
     let usage: Double
-
-    private var barColor: Color {
-        usage > 80 ? .red : usage > 50 ? .orange : .green
-    }
+    let theme: ColorTheme
 
     var body: some View {
         VStack(spacing: 2) {
@@ -865,7 +898,7 @@ struct CoreBar: View {
                     RoundedRectangle(cornerRadius: 2)
                         .fill(Color.primary.opacity(0.08))
                     RoundedRectangle(cornerRadius: 2)
-                        .fill(barColor)
+                        .fill(theme.fill(usageSeverity(usage, high: 80, mid: 50)))
                         .frame(height: geo.size.height * usage / 100)
                 }
             }

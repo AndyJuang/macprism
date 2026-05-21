@@ -55,6 +55,65 @@ enum TokenMenuBarSource: String, CaseIterable, Identifiable {
     }
 }
 
+/// 嚴重程度 —— 決定配色
+enum Severity { case ok, warn, high }
+
+/// 下拉面板配色主題
+enum ColorTheme: String, CaseIterable, Identifiable {
+    case standard, accessible, rainbow
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .standard:   return "標準"
+        case .accessible: return "色弱友善"
+        case .rainbow:    return "彩虹"
+        }
+    }
+
+    /// 稜鏡彩虹漸層
+    static let prismGradient = LinearGradient(
+        colors: [
+            Color(red: 0.973, green: 0.443, blue: 0.443),
+            Color(red: 0.984, green: 0.749, blue: 0.141),
+            Color(red: 0.204, green: 0.827, blue: 0.600),
+            Color(red: 0.220, green: 0.741, blue: 0.973),
+            Color(red: 0.506, green: 0.549, blue: 0.973),
+        ],
+        startPoint: .leading, endPoint: .trailing
+    )
+
+    /// 嚴重程度 → 單色（文字、小圖示用）
+    func color(_ s: Severity) -> Color {
+        switch self {
+        case .standard:
+            switch s {
+            case .ok:   return .green
+            case .warn: return .orange
+            case .high: return .red
+            }
+        case .accessible, .rainbow:
+            // 色弱友善：避開紅綠對比，改用藍／琥珀／紅，亮度也有明顯落差
+            switch s {
+            case .ok:   return Color(red: 0.16, green: 0.55, blue: 0.98)
+            case .warn: return Color(red: 0.95, green: 0.61, blue: 0.07)
+            case .high: return Color(red: 0.90, green: 0.16, blue: 0.22)
+            }
+        }
+    }
+
+    /// 嚴重程度 → 填色（進度條／走勢圖／圓環；彩虹模式回傳漸層）
+    func fill(_ s: Severity) -> AnyShapeStyle {
+        self == .rainbow ? AnyShapeStyle(ColorTheme.prismGradient) : AnyShapeStyle(color(s))
+    }
+
+    /// 裝飾色填色：彩虹模式統一漸層，其餘維持原色
+    func accentFill(_ c: Color) -> AnyShapeStyle {
+        self == .rainbow ? AnyShapeStyle(ColorTheme.prismGradient) : AnyShapeStyle(c)
+    }
+}
+
 final class AppSettings: ObservableObject {
     static let shared = AppSettings()
 
@@ -81,6 +140,11 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(menuBarShowGraph, forKey: Keys.menuBarGraph) }
     }
 
+    /// 下拉面板配色主題
+    @Published var colorTheme: ColorTheme {
+        didSet { UserDefaults.standard.set(colorTheme.rawValue, forKey: Keys.colorTheme) }
+    }
+
     private enum Keys {
         static let menuBar      = "macprism.settings.menuBarItems"
         static let panelOrder   = "macprism.settings.panelOrder"
@@ -88,6 +152,7 @@ final class AppSettings: ObservableObject {
         static let legacyPanel  = "macprism.settings.panelItems"  // 舊版鍵
         static let tokenSource  = "macprism.settings.tokenMenuBarSource"
         static let menuBarGraph = "macprism.settings.menuBarShowGraph"
+        static let colorTheme   = "macprism.settings.colorTheme"
     }
 
     /// 預設：menu bar 顯示 CPU / 記憶體 / 網路 / 電池；面板依 allCases 順序、全部啟用
@@ -106,6 +171,9 @@ final class AppSettings: ObservableObject {
         self.tokenMenuBarSource = TokenMenuBarSource(rawValue: rawSource) ?? .lowest
 
         self.menuBarShowGraph = UserDefaults.standard.bool(forKey: Keys.menuBarGraph)
+
+        let rawTheme = UserDefaults.standard.string(forKey: Keys.colorTheme) ?? ""
+        self.colorTheme = ColorTheme(rawValue: rawTheme) ?? .standard
     }
 
     func toggleMenuBar(_ item: StatItem) {
@@ -128,6 +196,7 @@ final class AppSettings: ObservableObject {
         panelEnabled       = AppSettings.defaultPanelEnabled
         tokenMenuBarSource = .lowest
         menuBarShowGraph   = false
+        colorTheme         = .standard
     }
 
     // MARK: - Persistence

@@ -77,6 +77,19 @@ struct SettingsView: View {
             .listStyle(.inset)
             .frame(minHeight: 240)
 
+            HStack {
+                Label("配色", systemImage: "paintpalette")
+                Spacer()
+                Picker("", selection: $settings.colorTheme) {
+                    ForEach(ColorTheme.allCases) { theme in
+                        Text(theme.label).tag(theme)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 230)
+            }
+
             footer
         }
     }
