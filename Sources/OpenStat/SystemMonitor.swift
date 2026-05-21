@@ -118,6 +118,14 @@ class SystemMonitor: ObservableObject {
     var maxTemperature: Double? { temperatures.first?.celsius }
     var sensorsAvailable: Bool { !temperatures.isEmpty || !fans.isEmpty }
 
+    // 歷史走勢（最近 60 筆 ≈ 2 分鐘）
+    @Published var cpuHistory: [Double] = []
+    @Published var memHistory: [Double] = []
+    @Published var gpuHistory: [Double] = []
+    @Published var netUpHistory: [Double] = []
+    @Published var netDownHistory: [Double] = []
+    private let historyLimit = 60
+
     private var tickCount = 0
 
     private var previousCPUTicks: [Int32] = []
@@ -157,6 +165,20 @@ class SystemMonitor: ObservableObject {
         updateLoadAndUptime()
         if tickCount % 5 == 0 { updateBluetooth() }   // 藍牙約每 10 秒掃一次
         tickCount += 1
+        pushHistory()
+    }
+
+    /// 把本輪數值推入歷史環形緩衝
+    private func pushHistory() {
+        func push(_ value: Double, _ arr: inout [Double]) {
+            arr.append(value)
+            if arr.count > historyLimit { arr.removeFirst() }
+        }
+        push(cpuUsage, &cpuHistory)
+        push(Double(memoryUsed) / Double(max(1, memoryTotal)) * 100, &memHistory)
+        push(gpuUsage, &gpuHistory)
+        push(networkUpload,   &netUpHistory)
+        push(networkDownload, &netDownHistory)
     }
 
     private func updateCPU() {
@@ -296,10 +318,10 @@ class SystemMonitor: ObservableObject {
             let mount: String = withUnsafePointer(to: &v.mountPoint) { ptr in
                 ptr.withMemoryRebound(to: CChar.self, capacity: 256) { String(cString: $0) }
             }
-            let name: String = withUnsafePointer(to: &v.name) { ptr in
-                ptr.withMemoryRebound(to: CChar.self, capacity: 128) { String(cString: $0) }
-            }
-            vols.append(VolumeUsage(id: mount, name: name, total: v.totalBytes, free: v.freeBytes))
+            // 友善卷宗名稱（如「Macintosh HD」），取不到時退回掛載點
+            let volumeName = (try? URL(fileURLWithPath: mount)
+                .resourceValues(forKeys: [.volumeNameKey]))?.volumeName ?? ""
+            vols.append(VolumeUsage(id: mount, name: volumeName, total: v.totalBytes, free: v.freeBytes))
         }
         // 根目錄優先，其餘按容量排
         volumes = vols.sorted { a, b in

@@ -8,6 +8,7 @@ class StatusBarController: NSObject, NSMenuDelegate {
     private var popover: NSPopover
     private let monitor: SystemMonitor
     private let tokenMonitor = TokenUsageMonitor()
+    private let networkMonitor = NetworkInfoMonitor()
     private let settings = AppSettings.shared
     private var timer: Timer?
     private var tokenTimer: Timer?
@@ -37,11 +38,11 @@ class StatusBarController: NSObject, NSMenuDelegate {
     }
 
     private func setupPopover() {
-        let content = NSHostingController(rootView: ContentView(monitor: monitor, tokenMonitor: tokenMonitor, settings: settings))
-        content.view.frame = NSRect(x: 0, y: 0, width: 320, height: 520)
+        let content = NSHostingController(rootView: ContentView(monitor: monitor, tokenMonitor: tokenMonitor, networkMonitor: networkMonitor, settings: settings))
+        content.view.frame = NSRect(x: 0, y: 0, width: 360, height: 520)
 
         popover.contentViewController = content
-        popover.contentSize = NSSize(width: 320, height: 520)
+        popover.contentSize = NSSize(width: 360, height: 520)
         popover.behavior    = .transient
         popover.animates    = true
     }
@@ -49,10 +50,12 @@ class StatusBarController: NSObject, NSMenuDelegate {
     private func startMonitoring() {
         monitor.update()
         tokenMonitor.refresh(force: true)
+        networkMonitor.refresh(force: true)
         refreshStatusBar()
 
         timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             self?.monitor.update()
+            self?.networkMonitor.refresh()
             self?.refreshStatusBar()
         }
 
@@ -71,6 +74,11 @@ class StatusBarController: NSObject, NSMenuDelegate {
             .store(in: &cancellables)
 
         settings.$tokenMenuBarSource
+            .dropFirst()
+            .sink { [weak self] _ in self?.refreshStatusBar() }
+            .store(in: &cancellables)
+
+        settings.$menuBarShowGraph
             .dropFirst()
             .sink { [weak self] _ in self?.refreshStatusBar() }
             .store(in: &cancellables)
@@ -111,14 +119,41 @@ class StatusBarController: NSObject, NSMenuDelegate {
             parts.append(menuBarDateString())
         }
 
-        // 全部關閉時退回顯示圖示，避免 menu bar 變空白
-        if parts.isEmpty {
+        let graph = settings.menuBarShowGraph ? cpuGraphImage() : nil
+
+        // 全部關閉且無走勢圖時退回顯示圖示，避免 menu bar 變空白
+        if parts.isEmpty && graph == nil {
             statusItem.button?.image = NSImage(systemSymbolName: "gauge.medium", accessibilityDescription: "OpenStat")
             statusItem.button?.title = ""
         } else {
-            statusItem.button?.image = nil
+            statusItem.button?.image = graph
+            statusItem.button?.imagePosition = .imageLeading
             statusItem.button?.title = parts.joined(separator: " ")
         }
+    }
+
+    /// 把 CPU 歷史走勢畫成 menu bar 用的小圖
+    private func cpuGraphImage() -> NSImage? {
+        let history = monitor.cpuHistory
+        guard history.count > 1 else { return nil }
+        let w: CGFloat = 32, h: CGFloat = 14
+        let image = NSImage(size: NSSize(width: w, height: h))
+        image.lockFocus()
+        let path = NSBezierPath()
+        let maxV = max(history.max() ?? 1, 1)
+        for (i, value) in history.enumerated() {
+            let x = w * CGFloat(i) / CGFloat(history.count - 1)
+            let y = h * CGFloat(min(value / maxV, 1))
+            let point = NSPoint(x: x, y: y)
+            if i == 0 { path.move(to: point) } else { path.line(to: point) }
+        }
+        path.lineWidth = 1
+        path.lineJoinStyle = .round
+        NSColor.labelColor.setStroke()
+        path.stroke()
+        image.unlockFocus()
+        image.isTemplate = true
+        return image
     }
 
     @objc private func handleClick(_ sender: NSStatusBarButton) {
@@ -132,6 +167,7 @@ class StatusBarController: NSObject, NSMenuDelegate {
 
     private func openPopover(_ sender: NSStatusBarButton) {
         tokenMonitor.refresh()
+        networkMonitor.refresh()
         popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
         eventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
             self?.closePopover()

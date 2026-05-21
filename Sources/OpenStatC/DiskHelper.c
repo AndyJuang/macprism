@@ -48,21 +48,52 @@ int getDiskVolumes(DiskVolumeInfo *out, int maxCount) {
     int n = getmntinfo(&mounts, MNT_NOWAIT);
     if (n <= 0) return 0;
 
+    // 每顆實體磁碟只收一次
+    char seenDisks[16][16];
+    int seenCount = 0;
+
     int count = 0;
     for (int i = 0; i < n && count < maxCount; i++) {
         const struct statfs *m = &mounts[i];
-
-        // 過濾網路/虛擬掛載：只看 local 實體磁碟
         if ((m->f_flags & MNT_LOCAL) == 0) continue;
-        // 系統建立的隱藏 snapshot 掛載常以 /System/Volumes/ 開頭，保留根目錄與一般 /Volumes
-        if (strncmp(m->f_mntonname, "/private/var/vm", 15) == 0) continue;
-        if (strstr(m->f_fstypename, "devfs"))  continue;
+
+        // 只保留掛在 "/" 或 "/Volumes/" 的卷宗 —— 即「整顆磁碟」；
+        // APFS 拆出的 /System/Volumes/* 系統磁區一律略過，不分磁區
+        int isRoot    = (strcmp(m->f_mntonname, "/") == 0);
+        int isVolumes = (strncmp(m->f_mntonname, "/Volumes/", 9) == 0);
+        if (!isRoot && !isVolumes) continue;
 
         uint64_t bsize = (uint64_t)m->f_bsize;
-        out[count].totalBytes = (uint64_t)m->f_blocks * bsize;
-        out[count].freeBytes  = (uint64_t)m->f_bavail * bsize;
-        if (out[count].totalBytes == 0) continue;
+        uint64_t total = (uint64_t)m->f_blocks * bsize;
+        if (total == 0) continue;
 
+        // 由 device 取實體磁碟 id（/dev/disk3s1s1 → disk3），同一磁碟只收一次
+        char diskID[16] = {0};
+        const char *dev = strstr(m->f_mntfromname, "disk");
+        if (dev) {
+            int k = 0;
+            while (k < 15 && dev[k]) {
+                char c = dev[k];
+                if (k < 4) diskID[k] = c;                       // "disk"
+                else if (c >= '0' && c <= '9') diskID[k] = c;   // 磁碟編號
+                else break;
+                k++;
+            }
+            diskID[k] = '\0';
+        }
+        int dup = 0;
+        for (int s = 0; s < seenCount; s++) {
+            if (strcmp(seenDisks[s], diskID) == 0) { dup = 1; break; }
+        }
+        if (dup) continue;
+        if (seenCount < 16 && diskID[0] != '\0') {
+            strncpy(seenDisks[seenCount], diskID, 15);
+            seenDisks[seenCount][15] = '\0';
+            seenCount++;
+        }
+
+        out[count].totalBytes = total;
+        out[count].freeBytes  = (uint64_t)m->f_bavail * bsize;
         strncpy(out[count].mountPoint, m->f_mntonname, sizeof(out[count].mountPoint) - 1);
         out[count].mountPoint[sizeof(out[count].mountPoint) - 1] = '\0';
         strncpy(out[count].name, m->f_mntfromname, sizeof(out[count].name) - 1);

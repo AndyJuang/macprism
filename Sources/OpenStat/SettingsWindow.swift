@@ -43,6 +43,11 @@ struct SettingsView: View {
                 .disabled(!settings.menuBarItems.contains(.tokenUsage))
             }
 
+            Toggle(isOn: $settings.menuBarShowGraph) {
+                Label("顯示 CPU 走勢小圖", systemImage: "chart.xyaxis.line")
+            }
+            .toggleStyle(.checkbox)
+
             Spacer()
             footer
         }

@@ -23,7 +23,7 @@
 |------|------|
 | **CPU** | 整體使用率 + 各核心柱狀圖、load average、開機時間，`host_processor_info` |
 | **記憶體** | Active / Wired / Compressed 分層、Swap 用量、記憶體壓力，`vm_statistics64` |
-| **網路** | 上傳／下載即時速率，跨所有非 loopback 介面加總 |
+| **網路** | 上傳／下載速率與走勢圖、區域／公開 IP、地理位置、App 流量排行、連線清單 |
 | **GPU** | 使用率與配置記憶體，透過 IORegistry `IOAccelerator` |
 | **磁碟** | 全系統讀寫速率（`IOBlockStorageDriver`）+ 各掛載點容量（`getmntinfo`） |
 | **電池** | 電量、充電狀態、瞬時功率（W）、循環次數、健康度、藍牙裝置電量 |
@@ -33,7 +33,8 @@
 | **日期** | menu bar 日期 + 下拉面板當月月曆 |
 | **固定寬度** | 等寬字型（SF Mono），數值更新不會讓 menu bar 跳動 |
 | **登入自動啟動** | 右鍵選單一鍵切換，使用 `SMAppService` |
-| **Menu Bar 自訂** | 右鍵 → Menu Bar 顯示，可開關 GPU / 磁碟 I/O / 電量 |
+| **走勢圖** | CPU / 記憶體 / GPU / 網路面板皆附迷你折線走勢（最近 2 分鐘） |
+| **Menu Bar 自訂** | 右鍵 → Menu Bar 顯示可開關各項，並可顯示 CPU 走勢小圖 |
 
 ## 截圖
 
@@ -119,6 +120,8 @@ openstat/
 **AI 額度：** Codex 直接讀 `~/.codex/sessions` 最新 rollout 檔內建的 rate-limit 快照（完全離線）。Claude Code 優先讀 `~/.claude/usage-status.json` —— 由 `statusline.sh` 擷取 statusLine 的 `rate_limits` 寫出（同樣離線、不動狀態列輸出）；缺檔或快照超過 6 小時才退回呼叫 `api.anthropic.com/api/oauth/usage`（OAuth 憑證取自 Keychain）。兩者皆聚焦「目前 5 小時滾動視窗」，每 60 秒刷新（API 退回路徑內部節流至 5 分鐘）。
 
 **感測器：** 溫度透過私有 API `IOHIDEventSystemClient`（page `0xff00` / usage `5`）列舉所有溫度感測器 —— Apple Silicon 唯一可靠來源；風扇透過 `AppleSMC` 讀 `FNum` / `F?Ac` 等鍵。電池健康度為 `AppleRawMaxCapacity ÷ DesignCapacity`；藍牙裝置電量掃 IORegistry 帶 `BatteryPercent` 屬性的節點（涵蓋巧控滑鼠／鍵盤／觸控板，AirPods 不一定曝露）。
+
+**網路進階：** 區域 IP 由 `getifaddrs` 取得；公開 IP 與地理位置查詢 `ipinfo.io`（每 30 分鐘、唯一的對外連線）；App 流量解析 `nettop` 輸出、連線清單解析 `lsof -i`（每 8 秒）。
 
 ## 系統需求
 

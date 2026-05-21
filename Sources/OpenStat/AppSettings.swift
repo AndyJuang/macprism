@@ -76,12 +76,18 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(tokenMenuBarSource.rawValue, forKey: Keys.tokenSource) }
     }
 
+    /// menu bar 是否顯示 CPU 走勢小圖
+    @Published var menuBarShowGraph: Bool {
+        didSet { UserDefaults.standard.set(menuBarShowGraph, forKey: Keys.menuBarGraph) }
+    }
+
     private enum Keys {
         static let menuBar      = "openstat.settings.menuBarItems"
         static let panelOrder   = "openstat.settings.panelOrder"
         static let panelEnabled = "openstat.settings.panelEnabled"
         static let legacyPanel  = "openstat.settings.panelItems"  // 舊版鍵
         static let tokenSource  = "openstat.settings.tokenMenuBarSource"
+        static let menuBarGraph = "openstat.settings.menuBarShowGraph"
     }
 
     /// 預設：menu bar 顯示 CPU / 記憶體 / 網路 / 電池；面板依 allCases 順序、全部啟用
@@ -98,6 +104,8 @@ final class AppSettings: ObservableObject {
 
         let rawSource = UserDefaults.standard.string(forKey: Keys.tokenSource) ?? ""
         self.tokenMenuBarSource = TokenMenuBarSource(rawValue: rawSource) ?? .lowest
+
+        self.menuBarShowGraph = UserDefaults.standard.bool(forKey: Keys.menuBarGraph)
     }
 
     func toggleMenuBar(_ item: StatItem) {
@@ -119,6 +127,7 @@ final class AppSettings: ObservableObject {
         panelOrder         = AppSettings.defaultPanelOrder
         panelEnabled       = AppSettings.defaultPanelEnabled
         tokenMenuBarSource = .lowest
+        menuBarShowGraph   = false
     }
 
     // MARK: - Persistence

@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @ObservedObject var monitor: SystemMonitor
     @ObservedObject var tokenMonitor: TokenUsageMonitor
+    @ObservedObject var networkMonitor: NetworkInfoMonitor
     @ObservedObject var settings: AppSettings
     @State private var topMode: TopMode = .cpu
 
@@ -24,7 +25,7 @@ struct ContentView: View {
                 .padding(12)
             }
         }
-        .frame(width: 320, height: 520)
+        .frame(width: 360, height: 520)
     }
 
     @ViewBuilder
@@ -51,7 +52,7 @@ struct ContentView: View {
             Text("尚未選擇任何顯示項目")
                 .font(.subheadline)
             Text("右鍵 menu bar → 設定…")
-                .font(.caption)
+                .font(.system(size: 13))
                 .foregroundColor(.secondary)
         }
         .frame(maxWidth: .infinity)
@@ -70,7 +71,7 @@ struct ContentView: View {
             Button("結束") { NSApplication.shared.terminate(nil) }
                 .buttonStyle(.plain)
                 .foregroundColor(.secondary)
-                .font(.caption)
+                .font(.system(size: 13))
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -83,16 +84,21 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     Text("整體使用率")
-                        .font(.caption)
+                        .font(.system(size: 13))
                         .foregroundColor(.secondary)
                     Spacer()
                     Text(String(format: "%.1f%%", monitor.cpuUsage))
-                        .font(.caption)
+                        .font(.system(size: 13))
                         .foregroundColor(usageColor(monitor.cpuUsage, high: 80, mid: 50))
                         .monospacedDigit()
                 }
                 ProgressView(value: monitor.cpuUsage, total: 100)
                     .tint(usageColor(monitor.cpuUsage, high: 80, mid: 50))
+
+                Sparkline(values: monitor.cpuHistory,
+                          color: usageColor(monitor.cpuUsage, high: 80, mid: 50),
+                          maxValue: 100, unit: "%")
+                    .frame(height: 36)
 
                 if !monitor.cpuCores.isEmpty {
                     let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 4)
@@ -120,23 +126,27 @@ struct ContentView: View {
                 let ratio = Double(monitor.memoryUsed) / Double(max(1, monitor.memoryTotal))
                 HStack {
                     Text(formatBytes(monitor.memoryUsed))
-                        .font(.caption)
+                        .font(.system(size: 13))
                         .monospacedDigit()
                     Text("/")
-                        .font(.caption)
+                        .font(.system(size: 13))
                         .foregroundColor(.secondary)
                     Text(formatBytes(monitor.memoryTotal))
-                        .font(.caption)
+                        .font(.system(size: 13))
                         .foregroundColor(.secondary)
                         .monospacedDigit()
                     Spacer()
                     Text(String(format: "%.0f%%", ratio * 100))
-                        .font(.caption)
+                        .font(.system(size: 13))
                         .foregroundColor(ratioColor(ratio))
                         .monospacedDigit()
                 }
                 ProgressView(value: ratio, total: 1.0)
                     .tint(ratioColor(ratio))
+
+                Sparkline(values: monitor.memHistory, color: ratioColor(ratio),
+                          maxValue: 100, unit: "%")
+                    .frame(height: 36)
 
                 HStack(spacing: 12) {
                     MemLabel(color: .blue,   label: "Active",     value: formatBytes(monitor.memoryActive))
@@ -157,14 +167,65 @@ struct ContentView: View {
 
     private var networkSection: some View {
         StatCard(title: "網路", icon: "network") {
-            HStack(spacing: 0) {
-                NetStat(direction: "arrow.up", label: "上傳",
-                        value: formatSpeed(monitor.networkUpload),
-                        color: .orange)
-                Divider().frame(height: 36)
-                NetStat(direction: "arrow.down", label: "下載",
-                        value: formatSpeed(monitor.networkDownload),
-                        color: .cyan)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 0) {
+                    NetStat(direction: "arrow.up", label: "上傳",
+                            value: formatSpeed(monitor.networkUpload),
+                            color: .orange)
+                    Divider().frame(height: 36)
+                    NetStat(direction: "arrow.down", label: "下載",
+                            value: formatSpeed(monitor.networkDownload),
+                            color: .cyan)
+                }
+                Sparkline(values: monitor.netDownHistory, color: .cyan)
+                    .frame(height: 36)
+
+                InfoRow(label: "區域 IP", value: networkMonitor.localIP)
+                InfoRow(label: "公開 IP", value: networkMonitor.publicIP)
+                if !networkMonitor.ipLocation.isEmpty {
+                    InfoRow(label: "位置", value: networkMonitor.ipLocation)
+                }
+
+                if !networkMonitor.appTraffic.isEmpty {
+                    Divider()
+                    Text("App 流量")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                    ForEach(networkMonitor.appTraffic) { row in
+                        HStack {
+                            Text(row.name)
+                                .font(.system(size: 11))
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                            Spacer()
+                            Text("↓\(formatBytes(row.bytesIn))  ↑\(formatBytes(row.bytesOut))")
+                                .font(.system(size: 10))
+                                .foregroundColor(.secondary)
+                                .monospacedDigit()
+                        }
+                    }
+                }
+
+                if !networkMonitor.connections.isEmpty {
+                    Divider()
+                    Text("目前連線（\(networkMonitor.connections.count)）")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                    ForEach(networkMonitor.connections.prefix(6)) { conn in
+                        HStack {
+                            Text(conn.command)
+                                .font(.system(size: 11))
+                                .lineLimit(1)
+                            Spacer()
+                            Text(conn.remote)
+                                .font(.system(size: 10))
+                                .foregroundColor(.secondary)
+                                .monospacedDigit()
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                    }
+                }
             }
         }
     }
@@ -175,21 +236,25 @@ struct ContentView: View {
         StatCard(title: "GPU", icon: "display") {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    Text("使用率").font(.caption).foregroundColor(.secondary)
+                    Text("使用率").font(.system(size: 13)).foregroundColor(.secondary)
                     Spacer()
                     Text(String(format: "%.1f%%", monitor.gpuUsage))
-                        .font(.caption)
+                        .font(.system(size: 13))
                         .foregroundColor(usageColor(monitor.gpuUsage, high: 80, mid: 50))
                         .monospacedDigit()
                 }
                 ProgressView(value: min(monitor.gpuUsage, 100), total: 100)
                     .tint(usageColor(monitor.gpuUsage, high: 80, mid: 50))
+                Sparkline(values: monitor.gpuHistory,
+                          color: usageColor(monitor.gpuUsage, high: 80, mid: 50),
+                          maxValue: 100, unit: "%")
+                    .frame(height: 36)
                 if monitor.gpuMemoryMB > 0 {
                     HStack {
-                        Text("配置記憶體").font(.system(size: 9)).foregroundColor(.secondary)
+                        Text("配置記憶體").font(.system(size: 11)).foregroundColor(.secondary)
                         Spacer()
                         Text(String(format: "%.0f MB", monitor.gpuMemoryMB))
-                            .font(.system(size: 9))
+                            .font(.system(size: 11))
                             .monospacedDigit()
                     }
                 }
@@ -228,7 +293,7 @@ struct ContentView: View {
                         .foregroundColor(batteryColor(monitor.battery))
                     Spacer()
                     Text(batteryStateText(monitor.battery))
-                        .font(.caption)
+                        .font(.system(size: 13))
                         .foregroundColor(.secondary)
                 }
                 ProgressView(value: Double(monitor.battery.percent), total: 100)
@@ -255,15 +320,15 @@ struct ContentView: View {
                     ForEach(monitor.btDevices) { dev in
                         HStack(spacing: 6) {
                             Image(systemName: "wave.3.right.circle")
-                                .font(.system(size: 10))
+                                .font(.system(size: 12))
                                 .foregroundColor(.accentColor)
                             Text(dev.name)
-                                .font(.system(size: 10))
+                                .font(.system(size: 12))
                                 .lineLimit(1)
                                 .truncationMode(.tail)
                             Spacer()
                             Text("\(dev.percent)%")
-                                .font(.system(size: 10))
+                                .font(.system(size: 12))
                                 .monospacedDigit()
                                 .foregroundColor(dev.percent <= 20 ? .red : .secondary)
                         }
@@ -280,17 +345,17 @@ struct ContentView: View {
             VStack(alignment: .leading, spacing: 6) {
                 if monitor.temperatures.isEmpty && monitor.fans.isEmpty {
                     Text("無法讀取感測器資料")
-                        .font(.caption)
+                        .font(.system(size: 13))
                         .foregroundColor(.secondary)
                 } else {
                     if let maxT = monitor.maxTemperature {
                         HStack {
                             Text("最高溫度")
-                                .font(.caption)
+                                .font(.system(size: 13))
                                 .foregroundColor(.secondary)
                             Spacer()
                             Text(String(format: "%.0f°C", maxT))
-                                .font(.caption)
+                                .font(.system(size: 13))
                                 .monospacedDigit()
                                 .foregroundColor(tempColor(maxT))
                         }
@@ -298,34 +363,34 @@ struct ContentView: View {
                     ForEach(monitor.temperatures.prefix(6)) { temp in
                         HStack {
                             Text(temp.name)
-                                .font(.system(size: 9))
+                                .font(.system(size: 11))
                                 .foregroundColor(.secondary)
                                 .lineLimit(1)
                                 .truncationMode(.tail)
                             Spacer()
                             Text(String(format: "%.0f°C", temp.celsius))
-                                .font(.system(size: 9))
+                                .font(.system(size: 11))
                                 .monospacedDigit()
                                 .foregroundColor(tempColor(temp.celsius))
                         }
                     }
                     if monitor.fans.isEmpty {
                         Text("此機型無風扇")
-                            .font(.system(size: 9))
+                            .font(.system(size: 11))
                             .foregroundColor(.secondary)
                     } else {
                         Divider()
                         ForEach(monitor.fans) { fan in
                             HStack(spacing: 6) {
                                 Image(systemName: "fanblades")
-                                    .font(.system(size: 9))
+                                    .font(.system(size: 11))
                                     .foregroundColor(.accentColor)
                                 Text("風扇 \(fan.id + 1)")
-                                    .font(.system(size: 9))
+                                    .font(.system(size: 11))
                                     .foregroundColor(.secondary)
                                 Spacer()
                                 Text("\(fan.rpm) RPM")
-                                    .font(.system(size: 9))
+                                    .font(.system(size: 11))
                                     .monospacedDigit()
                             }
                         }
@@ -346,7 +411,7 @@ struct ContentView: View {
                         .font(.title3)
                         .fontWeight(.semibold)
                     Text(weekdayString(now))
-                        .font(.caption)
+                        .font(.system(size: 13))
                         .foregroundColor(.secondary)
                 }
                 MonthCalendarView(date: now)
@@ -367,7 +432,7 @@ struct ContentView: View {
 
                 let rows = topMode == .cpu ? monitor.topByCPU : monitor.topByMemory
                 if rows.isEmpty {
-                    Text("收集中…").font(.caption).foregroundColor(.secondary)
+                    Text("收集中…").font(.system(size: 13)).foregroundColor(.secondary)
                 } else {
                     ForEach(rows) { row in
                         ProcessRowView(row: row, mode: topMode)
@@ -383,7 +448,7 @@ struct ContentView: View {
         StatCard(title: "AI 額度", icon: "speedometer") {
             VStack(alignment: .leading, spacing: 10) {
                 Text("目前 5 小時視窗剩餘額度")
-                    .font(.system(size: 9))
+                    .font(.system(size: 11))
                     .foregroundColor(.secondary)
                 CLIUsageRow(usage: tokenMonitor.claude)
                 Divider()
@@ -487,21 +552,46 @@ struct VolumeRow: View {
     let ratioColor: (Double) -> Color
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack {
-                Text(vol.id)
-                    .font(.system(size: 9))
+        HStack(spacing: 10) {
+            DonutRing(ratio: vol.ratio, color: ratioColor(vol.ratio))
+                .frame(width: 46, height: 46)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(vol.name.isEmpty ? vol.id : vol.name)
+                    .font(.system(size: 12))
+                    .fontWeight(.medium)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                Spacer()
-                Text("\(formatBytes(vol.used)) / \(formatBytes(vol.total))")
-                    .font(.system(size: 9))
+                Text("已用 \(formatBytes(vol.used))")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                    .monospacedDigit()
+                Text("共 \(formatBytes(vol.total))")
+                    .font(.system(size: 11))
                     .foregroundColor(.secondary)
                     .monospacedDigit()
             }
-            ProgressView(value: vol.ratio, total: 1.0)
-                .tint(ratioColor(vol.ratio))
-                .scaleEffect(x: 1, y: 0.6)
+            Spacer()
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+/// 甜甜圈圓環，中央顯示百分比
+struct DonutRing: View {
+    let ratio: Double
+    let color: Color
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(Color.primary.opacity(0.1), lineWidth: 5)
+            Circle()
+                .trim(from: 0, to: CGFloat(min(max(ratio, 0), 1)))
+                .stroke(color, style: StrokeStyle(lineWidth: 5, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+            Text("\(Int((ratio * 100).rounded()))%")
+                .font(.system(size: 11, weight: .semibold))
+                .monospacedDigit()
         }
     }
 }
@@ -513,12 +603,12 @@ struct ProcessRowView: View {
     var body: some View {
         HStack(spacing: 6) {
             Text(row.name)
-                .font(.system(size: 10))
+                .font(.system(size: 12))
                 .lineLimit(1)
                 .truncationMode(.tail)
             Spacer()
             Text(valueText)
-                .font(.system(size: 10))
+                .font(.system(size: 12))
                 .foregroundColor(.secondary)
                 .monospacedDigit()
         }
@@ -540,17 +630,17 @@ struct CLIUsageRow: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(usage.name)
-                    .font(.caption)
+                    .font(.system(size: 13))
                     .fontWeight(.medium)
                 Spacer()
                 if usage.available {
                     Text("剩 \(Int(usage.remainingPercent.rounded()))%")
-                        .font(.caption)
+                        .font(.system(size: 13))
                         .monospacedDigit()
                         .foregroundColor(remainColor)
                 } else {
                     Text(usage.status)
-                        .font(.system(size: 9))
+                        .font(.system(size: 11))
                         .foregroundColor(.secondary)
                 }
             }
@@ -559,18 +649,18 @@ struct CLIUsageRow: View {
                     .tint(remainColor)
                 HStack {
                     Text(resetText)
-                        .font(.system(size: 9))
+                        .font(.system(size: 11))
                         .foregroundColor(.secondary)
                     Spacer()
                     if let week = usage.weekUsedPercent {
                         Text("本週已用 \(Int(week.rounded()))%")
-                            .font(.system(size: 9))
+                            .font(.system(size: 11))
                             .foregroundColor(.secondary)
                             .monospacedDigit()
                     }
                 }
                 Text(usage.status)
-                    .font(.system(size: 8))
+                    .font(.system(size: 10))
                     .foregroundColor(.secondary)
             }
         }
@@ -610,7 +700,7 @@ struct MonthCalendarView: View {
             HStack(spacing: 0) {
                 ForEach(weekdaySymbols, id: \.self) { sym in
                     Text(sym)
-                        .font(.system(size: 8))
+                        .font(.system(size: 10))
                         .foregroundColor(.secondary)
                         .frame(maxWidth: .infinity)
                 }
@@ -619,7 +709,7 @@ struct MonthCalendarView: View {
                 ForEach(Array(cells.enumerated()), id: \.offset) { _, day in
                     if let day = day {
                         Text("\(day)")
-                            .font(.system(size: 9))
+                            .font(.system(size: 11))
                             .monospacedDigit()
                             .frame(maxWidth: .infinity, minHeight: 16)
                             .background(isToday(day) ? Color.accentColor : Color.clear)
@@ -649,6 +739,91 @@ struct MonthCalendarView: View {
     }
 }
 
+/// 迷你走勢圖（折線）—— 含格線與 Y 軸刻度
+struct Sparkline: View {
+    let values: [Double]
+    let color: Color
+    var maxValue: Double? = nil   // nil = 依資料自動縮放（網路）；給值 = 固定上限（CPU/GPU 100）
+    var unit: String = ""
+
+    /// 縱軸上限
+    private var scaleMax: Double {
+        if let m = maxValue { return m }
+        return max(values.max() ?? 1, 0.0001)
+    }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            // Y 軸刻度：上限 / 中點 / 0
+            VStack(alignment: .trailing) {
+                Text(axisLabel(scaleMax))
+                Spacer()
+                Text(axisLabel(scaleMax / 2))
+                Spacer()
+                Text(axisLabel(0))
+            }
+            .font(.system(size: 8))
+            .foregroundColor(.secondary)
+            .monospacedDigit()
+            .frame(width: 32)
+
+            // 格線 + 折線
+            GeometryReader { geo in
+                ZStack {
+                    Path { p in
+                        for fraction in [0.0, 0.5, 1.0] {
+                            let y = geo.size.height * CGFloat(fraction)
+                            p.move(to: CGPoint(x: 0, y: y))
+                            p.addLine(to: CGPoint(x: geo.size.width, y: y))
+                        }
+                    }
+                    .stroke(Color.primary.opacity(0.13), lineWidth: 0.5)
+
+                    if values.count > 1 {
+                        Path { path in
+                            for (i, v) in values.enumerated() {
+                                let x = geo.size.width * CGFloat(i) / CGFloat(values.count - 1)
+                                let y = geo.size.height * (1 - CGFloat(min(v / scaleMax, 1)))
+                                if i == 0 { path.move(to: CGPoint(x: x, y: y)) }
+                                else      { path.addLine(to: CGPoint(x: x, y: y)) }
+                            }
+                        }
+                        .stroke(color, style: StrokeStyle(lineWidth: 1.5, lineJoin: .round))
+                    }
+                }
+            }
+        }
+    }
+
+    /// 縱軸刻度文字：固定上限 → 百分比；自動縮放 → 精簡速率
+    private func axisLabel(_ value: Double) -> String {
+        if maxValue != nil { return "\(Int(value))\(unit)" }
+        if value >= 1_048_576 { return String(format: "%.0fM", value / 1_048_576) }
+        if value >= 1_024     { return String(format: "%.0fK", value / 1_024) }
+        return "0"
+    }
+}
+
+/// 標籤 + 數值的小列
+struct InfoRow: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        HStack {
+            Text(label)
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+            Spacer()
+            Text(value)
+                .font(.system(size: 11))
+                .monospacedDigit()
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+    }
+}
+
 // MARK: - Sub-views
 
 struct StatCard<Content: View>: View {
@@ -660,10 +835,10 @@ struct StatCard<Content: View>: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 4) {
                 Image(systemName: icon)
-                    .font(.caption)
+                    .font(.system(size: 13))
                     .foregroundColor(.accentColor)
                 Text(title)
-                    .font(.caption)
+                    .font(.system(size: 13))
                     .fontWeight(.semibold)
             }
             content
@@ -696,7 +871,7 @@ struct CoreBar: View {
             }
             .frame(height: 24)
             Text("\(index)")
-                .font(.system(size: 8))
+                .font(.system(size: 10))
                 .foregroundColor(.secondary)
         }
     }
@@ -711,8 +886,8 @@ struct MemLabel: View {
         HStack(spacing: 3) {
             Circle().fill(color).frame(width: 6, height: 6)
             VStack(alignment: .leading, spacing: 0) {
-                Text(label).font(.system(size: 8)).foregroundColor(.secondary)
-                Text(value).font(.system(size: 9)).monospacedDigit()
+                Text(label).font(.system(size: 10)).foregroundColor(.secondary)
+                Text(value).font(.system(size: 11)).monospacedDigit()
             }
         }
     }
@@ -726,10 +901,10 @@ struct NetStat: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: direction).font(.caption).foregroundColor(color)
+            Image(systemName: direction).font(.system(size: 13)).foregroundColor(color)
             VStack(alignment: .leading, spacing: 1) {
-                Text(label).font(.system(size: 9)).foregroundColor(.secondary)
-                Text(value).font(.caption).monospacedDigit().fontWeight(.medium)
+                Text(label).font(.system(size: 11)).foregroundColor(.secondary)
+                Text(value).font(.system(size: 13)).monospacedDigit().fontWeight(.medium)
             }
         }
         .frame(maxWidth: .infinity)
