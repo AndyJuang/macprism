@@ -22,6 +22,7 @@ struct BatterySnapshot {
     let cycleCount: Int
     let currentCapacityWh: Double
     let maxCapacityWh: Double
+    let healthPercent: Int    // 電池健康度 0-100；0 = 無法取得
 
     /// 系統值不可用時，用剩餘電量 ÷ 瞬時功率估算放電剩餘分鐘。回傳 nil 表示無法估算。
     var estimatedTimeToEmptyMin: Int? {
@@ -49,6 +50,25 @@ struct ProcessRow: Identifiable {
     let residentBytes: UInt64
 }
 
+struct TempReading: Identifiable {
+    let id = UUID()
+    let name: String
+    let celsius: Double
+}
+
+struct FanRow: Identifiable {
+    let id: Int
+    let rpm: Int
+    let minRPM: Int
+    let maxRPM: Int
+}
+
+struct BTDeviceRow: Identifiable {
+    let id = UUID()
+    let name: String
+    let percent: Int
+}
+
 class SystemMonitor: ObservableObject {
     @Published var cpuUsage: Double = 0
     @Published var cpuCores: [Double] = []
@@ -74,11 +94,31 @@ class SystemMonitor: ObservableObject {
     @Published var battery: BatterySnapshot = BatterySnapshot(
         present: false, percent: 0, isCharging: false, isPluggedIn: false,
         timeToEmptyMin: -1, timeToFullMin: -1, powerWatts: 0, cycleCount: 0,
-        currentCapacityWh: 0, maxCapacityWh: 0)
+        currentCapacityWh: 0, maxCapacityWh: 0, healthPercent: 0)
+    @Published var btDevices: [BTDeviceRow] = []
 
     // Top Process
     @Published var topByCPU: [ProcessRow] = []
     @Published var topByMemory: [ProcessRow] = []
+
+    // 感測器
+    @Published var temperatures: [TempReading] = []
+    @Published var fans: [FanRow] = []
+
+    // 記憶體進階
+    @Published var swapUsedBytes: UInt64 = 0
+    @Published var swapTotalBytes: UInt64 = 0
+    @Published var memoryPressureLevel: Int = 1   // 1 正常 / 2 警告 / 4 危急
+
+    // 系統
+    @Published var loadAverage: [Double] = []
+    @Published var uptimeSeconds: Double = 0
+
+    /// 最高溫度（感測器已依溫度排序）
+    var maxTemperature: Double? { temperatures.first?.celsius }
+    var sensorsAvailable: Bool { !temperatures.isEmpty || !fans.isEmpty }
+
+    private var tickCount = 0
 
     private var previousCPUTicks: [Int32] = []
     private var previousBytesIn: UInt64 = 0
@@ -113,6 +153,10 @@ class SystemMonitor: ObservableObject {
         updateGPU()
         updateBattery()
         updateProcesses()
+        updateSensors()
+        updateLoadAndUptime()
+        if tickCount % 5 == 0 { updateBluetooth() }   // 藍牙約每 10 秒掃一次
+        tickCount += 1
     }
 
     private func updateCPU() {
@@ -188,6 +232,21 @@ class SystemMonitor: ObservableObject {
         memoryActive     = active
         memoryWired      = wired
         memoryCompressed = compressed
+
+        // Swap 使用量
+        var swap = xsw_usage()
+        var swapSize = MemoryLayout<xsw_usage>.size
+        if sysctlbyname("vm.swapusage", &swap, &swapSize, nil, 0) == 0 {
+            swapTotalBytes = swap.xsu_total
+            swapUsedBytes  = swap.xsu_used
+        }
+
+        // 記憶體壓力等級（1 正常 / 2 警告 / 4 危急）
+        var level: Int32 = 0
+        var levelSize = MemoryLayout<Int32>.size
+        if sysctlbyname("kern.memorystatus_vm_pressure_level", &level, &levelSize, nil, 0) == 0 {
+            memoryPressureLevel = Int(level)
+        }
     }
 
     private func updateNetwork() {
@@ -273,7 +332,8 @@ class SystemMonitor: ObservableObject {
             powerWatts: b.powerWatts,
             cycleCount: Int(b.cycleCount),
             currentCapacityWh: b.currentCapacityWh,
-            maxCapacityWh: b.maxCapacityWh
+            maxCapacityWh: b.maxCapacityWh,
+            healthPercent: Int(b.healthPercent)
         )
     }
 
@@ -327,5 +387,68 @@ class SystemMonitor: ObservableObject {
         previousProcCPU = current
         topByCPU    = Array(rows.sorted { $0.cpuPercent    > $1.cpuPercent    }.prefix(5))
         topByMemory = Array(rows.sorted { $0.residentBytes > $1.residentBytes }.prefix(5))
+    }
+
+    // MARK: - 感測器（溫度 / 風扇）
+
+    private func updateSensors() {
+        var tbuf = [TempSensor](repeating: TempSensor(), count: 64)
+        let tn = Int(tbuf.withUnsafeMutableBufferPointer { ptr -> Int32 in
+            getTemperatureSensors(ptr.baseAddress, Int32(ptr.count))
+        })
+        var temps: [TempReading] = []
+        temps.reserveCapacity(tn)
+        for i in 0..<tn {
+            var t = tbuf[i]
+            let name = withUnsafePointer(to: &t.name) { ptr in
+                ptr.withMemoryRebound(to: CChar.self, capacity: 80) { String(cString: $0) }
+            }
+            temps.append(TempReading(name: name, celsius: t.celsius))
+        }
+        temperatures = temps.sorted { $0.celsius > $1.celsius }
+
+        var fbuf = [FanReading](repeating: FanReading(), count: 8)
+        let fn = Int(fbuf.withUnsafeMutableBufferPointer { ptr -> Int32 in
+            getFans(ptr.baseAddress, Int32(ptr.count))
+        })
+        fans = (0..<fn).map { i in
+            FanRow(id: i, rpm: Int(fbuf[i].actualRPM),
+                   minRPM: Int(fbuf[i].minRPM), maxRPM: Int(fbuf[i].maxRPM))
+        }
+    }
+
+    // MARK: - 藍牙裝置電量
+
+    private func updateBluetooth() {
+        var buf = [BTDevice](repeating: BTDevice(), count: 16)
+        let n = Int(buf.withUnsafeMutableBufferPointer { ptr -> Int32 in
+            getBluetoothBatteries(ptr.baseAddress, Int32(ptr.count))
+        })
+        var rows: [BTDeviceRow] = []
+        var seen = Set<String>()
+        for i in 0..<n {
+            var d = buf[i]
+            let name = withUnsafePointer(to: &d.name) { ptr in
+                ptr.withMemoryRebound(to: CChar.self, capacity: 80) { String(cString: $0) }
+            }
+            if name.isEmpty || seen.contains(name) { continue }
+            seen.insert(name)
+            rows.append(BTDeviceRow(name: name, percent: Int(d.percent)))
+        }
+        btDevices = rows
+    }
+
+    // MARK: - Load Average / Uptime
+
+    private func updateLoadAndUptime() {
+        var loads = [Double](repeating: 0, count: 3)
+        if getloadavg(&loads, 3) != -1 {
+            loadAverage = loads
+        }
+        var boot = timeval()
+        var size = MemoryLayout<timeval>.size
+        if sysctlbyname("kern.boottime", &boot, &size, nil, 0) == 0, boot.tv_sec > 0 {
+            uptimeSeconds = Date().timeIntervalSince1970 - Double(boot.tv_sec)
+        }
     }
 }

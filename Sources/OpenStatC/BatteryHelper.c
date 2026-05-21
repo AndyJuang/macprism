@@ -94,6 +94,21 @@ BatteryInfo getBatteryInfo(void) {
             info.maxCapacityWh = (double)mAh * (double)mV / 1.0e6;
         }
 
+        // 電池健康度 = 滿充電容量 ÷ 設計電容量
+        CFNumberRef rawMx  = (CFNumberRef)IORegistryEntryCreateCFProperty(batt, CFSTR("AppleRawMaxCapacity"), kCFAllocatorDefault, 0);
+        CFNumberRef design = (CFNumberRef)IORegistryEntryCreateCFProperty(batt, CFSTR("DesignCapacity"), kCFAllocatorDefault, 0);
+        if (rawMx && design) {
+            int64_t r = 0, d = 0;
+            CFNumberGetValue(rawMx,  kCFNumberSInt64Type, &r);
+            CFNumberGetValue(design, kCFNumberSInt64Type, &d);
+            if (d > 0) {
+                int h = (int)((double)r / (double)d * 100.0 + 0.5);
+                info.healthPercent = h > 100 ? 100 : h;   // 新電池 raw 容量可能略高於設計值
+            }
+        }
+        if (rawMx)  CFRelease(rawMx);
+        if (design) CFRelease(design);
+
         if (amp) CFRelease(amp);
         if (vol) CFRelease(vol);
         if (cyc) CFRelease(cyc);
@@ -103,4 +118,51 @@ BatteryInfo getBatteryInfo(void) {
     }
 
     return info;
+}
+
+int getBluetoothBatteries(BTDevice *out, int maxCount) {
+    io_iterator_t iter = 0;
+    if (IORegistryCreateIterator(kIOMainPortDefault, kIOServicePlane,
+            kIORegistryIterateRecursively, &iter) != KERN_SUCCESS) {
+        return 0;
+    }
+
+    int count = 0;
+    io_registry_entry_t entry;
+    while ((entry = IOIteratorNext(iter)) != 0 && count < maxCount) {
+        CFTypeRef pct = IORegistryEntryCreateCFProperty(entry, CFSTR("BatteryPercent"), kCFAllocatorDefault, 0);
+        if (pct) {
+            int percent = 0;
+            if (CFGetTypeID(pct) == CFNumberGetTypeID()) {
+                CFNumberGetValue((CFNumberRef)pct, kCFNumberIntType, &percent);
+            }
+            CFRelease(pct);
+
+            if (percent > 0 && percent <= 100) {
+                char nameBuf[80] = {0};
+                CFTypeRef product = IORegistryEntryCreateCFProperty(entry, CFSTR("Product"), kCFAllocatorDefault, 0);
+                if (product) {
+                    if (CFGetTypeID(product) == CFStringGetTypeID()) {
+                        CFStringGetCString((CFStringRef)product, nameBuf, sizeof(nameBuf), kCFStringEncodingUTF8);
+                    }
+                    CFRelease(product);
+                }
+                if (nameBuf[0] == '\0') {
+                    io_name_t rname;
+                    if (IORegistryEntryGetName(entry, rname) == KERN_SUCCESS) {
+                        strncpy(nameBuf, rname, sizeof(nameBuf) - 1);
+                    }
+                }
+                if (nameBuf[0] == '\0') strncpy(nameBuf, "藍牙裝置", sizeof(nameBuf) - 1);
+
+                strncpy(out[count].name, nameBuf, sizeof(out[count].name) - 1);
+                out[count].name[sizeof(out[count].name) - 1] = '\0';
+                out[count].percent = percent;
+                count++;
+            }
+        }
+        IOObjectRelease(entry);
+    }
+    IOObjectRelease(iter);
+    return count;
 }

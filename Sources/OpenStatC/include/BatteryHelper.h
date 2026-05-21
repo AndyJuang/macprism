@@ -13,6 +13,15 @@ typedef struct {
     int    cycleCount;       // 充放電循環次數；無法取得時為 0
     double currentCapacityWh;// 當前剩餘電量（Wh）；無法取得時為 0
     double maxCapacityWh;    // 滿充電量（Wh）；無法取得時為 0
+    int    healthPercent;    // 電池健康度 0-100（滿充 ÷ 設計電容量）；0 = 無法取得
 } BatteryInfo;
 
+typedef struct {
+    char name[80];           // 裝置名稱
+    int  percent;            // 電量 0-100
+} BTDevice;
+
 BatteryInfo getBatteryInfo(void);
+
+// 掃 IORegistry 找帶 BatteryPercent 的藍牙裝置（滑鼠 / 鍵盤 / 觸控板等），回傳數量
+int getBluetoothBatteries(BTDevice *out, int maxCount);

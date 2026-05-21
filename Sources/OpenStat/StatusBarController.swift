@@ -100,9 +100,15 @@ class StatusBarController: NSObject, NSMenuDelegate {
         if items.contains(.battery) && monitor.battery.present {
             parts.append("\(monitor.battery.percent)%" + (monitor.battery.isCharging ? "⚡" : ""))
         }
+        if items.contains(.sensors), let temp = monitor.maxTemperature {
+            parts.append(String(format: "%.0f°", temp))
+        }
         if items.contains(.tokenUsage),
            let text = tokenMonitor.menuBarText(for: settings.tokenMenuBarSource) {
             parts.append(text)
+        }
+        if items.contains(.date) {
+            parts.append(menuBarDateString())
         }
 
         // 全部關閉時退回顯示圖示，避免 menu bar 變空白
@@ -202,5 +208,12 @@ class StatusBarController: NSObject, NSMenuDelegate {
         if bps >= 1_048_576 { return String(format: "%3.0fM", bps / 1_048_576) }
         if bps >= 1_024     { return String(format: "%3.0fK", bps / 1_024) }
         return String(format: "%3.0fB", bps)
+    }
+
+    private func menuBarDateString() -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "zh_Hant_TW")
+        f.dateFormat = "M/d EEE"
+        return f.string(from: Date())
     }
 }

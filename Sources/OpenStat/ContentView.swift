@@ -36,8 +36,10 @@ struct ContentView: View {
         case .network:    networkSection
         case .disk:       diskSection
         case .battery:    if monitor.battery.present { batterySection }
+        case .sensors:    sensorsSection
         case .topProcess: topProcessSection
         case .tokenUsage: tokenUsageSection
+        case .date:       dateSection
         }
     }
 
@@ -100,6 +102,12 @@ struct ContentView: View {
                         }
                     }
                 }
+
+                HStack(spacing: 12) {
+                    MemLabel(color: .indigo, label: "負載 1/5/15m", value: loadAvgText)
+                    Spacer()
+                    MemLabel(color: .gray, label: "開機時間", value: uptimeText)
+                }
             }
         }
     }
@@ -134,6 +142,12 @@ struct ContentView: View {
                     MemLabel(color: .blue,   label: "Active",     value: formatBytes(monitor.memoryActive))
                     MemLabel(color: .orange, label: "Wired",      value: formatBytes(monitor.memoryWired))
                     MemLabel(color: .purple, label: "Compressed", value: formatBytes(monitor.memoryCompressed))
+                }
+
+                HStack(spacing: 12) {
+                    MemLabel(color: .teal, label: "Swap", value: formatBytes(monitor.swapUsedBytes))
+                    MemLabel(color: pressureColor, label: "記憶體壓力", value: pressureLabel)
+                    Spacer()
                 }
             }
         }
@@ -228,8 +242,114 @@ struct ContentView: View {
                         MemLabel(color: .gray, label: "循環",
                                  value: "\(monitor.battery.cycleCount)")
                     }
+                    if monitor.battery.healthPercent > 0 {
+                        MemLabel(color: healthColor(monitor.battery.healthPercent),
+                                 label: "健康度",
+                                 value: "\(monitor.battery.healthPercent)%")
+                    }
                     Spacer()
                 }
+
+                if !monitor.btDevices.isEmpty {
+                    Divider()
+                    ForEach(monitor.btDevices) { dev in
+                        HStack(spacing: 6) {
+                            Image(systemName: "wave.3.right.circle")
+                                .font(.system(size: 10))
+                                .foregroundColor(.accentColor)
+                            Text(dev.name)
+                                .font(.system(size: 10))
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                            Spacer()
+                            Text("\(dev.percent)%")
+                                .font(.system(size: 10))
+                                .monospacedDigit()
+                                .foregroundColor(dev.percent <= 20 ? .red : .secondary)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - 感測器
+
+    private var sensorsSection: some View {
+        StatCard(title: "感測器", icon: "thermometer") {
+            VStack(alignment: .leading, spacing: 6) {
+                if monitor.temperatures.isEmpty && monitor.fans.isEmpty {
+                    Text("無法讀取感測器資料")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                } else {
+                    if let maxT = monitor.maxTemperature {
+                        HStack {
+                            Text("最高溫度")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Text(String(format: "%.0f°C", maxT))
+                                .font(.caption)
+                                .monospacedDigit()
+                                .foregroundColor(tempColor(maxT))
+                        }
+                    }
+                    ForEach(monitor.temperatures.prefix(6)) { temp in
+                        HStack {
+                            Text(temp.name)
+                                .font(.system(size: 9))
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                            Spacer()
+                            Text(String(format: "%.0f°C", temp.celsius))
+                                .font(.system(size: 9))
+                                .monospacedDigit()
+                                .foregroundColor(tempColor(temp.celsius))
+                        }
+                    }
+                    if monitor.fans.isEmpty {
+                        Text("此機型無風扇")
+                            .font(.system(size: 9))
+                            .foregroundColor(.secondary)
+                    } else {
+                        Divider()
+                        ForEach(monitor.fans) { fan in
+                            HStack(spacing: 6) {
+                                Image(systemName: "fanblades")
+                                    .font(.system(size: 9))
+                                    .foregroundColor(.accentColor)
+                                Text("風扇 \(fan.id + 1)")
+                                    .font(.system(size: 9))
+                                    .foregroundColor(.secondary)
+                                Spacer()
+                                Text("\(fan.rpm) RPM")
+                                    .font(.system(size: 9))
+                                    .monospacedDigit()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - 日期
+
+    private var dateSection: some View {
+        StatCard(title: "日期", icon: "calendar") {
+            VStack(alignment: .leading, spacing: 8) {
+                let now = Date()
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(fullDateString(now))
+                        .font(.title3)
+                        .fontWeight(.semibold)
+                    Text(weekdayString(now))
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                MonthCalendarView(date: now)
             }
         }
     }
@@ -315,6 +435,48 @@ struct ContentView: View {
     private func formatMin(_ m: Int) -> String {
         if m < 60 { return "\(m) 分" }
         return "\(m / 60) 時 \(m % 60) 分"
+    }
+
+    // MARK: - 感測器 / 系統輔助
+
+    private func tempColor(_ celsius: Double) -> Color {
+        celsius >= 85 ? .red : celsius >= 70 ? .orange : .green
+    }
+
+    private func healthColor(_ percent: Int) -> Color {
+        percent < 80 ? .orange : .green
+    }
+
+    private var loadAvgText: String {
+        guard monitor.loadAverage.count == 3 else { return "—" }
+        return monitor.loadAverage.map { String(format: "%.2f", $0) }.joined(separator: " ")
+    }
+
+    private var uptimeText: String {
+        let total = Int(monitor.uptimeSeconds)
+        guard total > 0 else { return "—" }
+        let days = total / 86400
+        let hours = (total % 86400) / 3600
+        let mins = (total % 3600) / 60
+        if days > 0 { return "\(days) 天 \(hours) 時" }
+        if hours > 0 { return "\(hours) 時 \(mins) 分" }
+        return "\(mins) 分"
+    }
+
+    private var pressureLabel: String {
+        switch monitor.memoryPressureLevel {
+        case 4:  return "危急"
+        case 2:  return "警告"
+        default: return "正常"
+        }
+    }
+
+    private var pressureColor: Color {
+        switch monitor.memoryPressureLevel {
+        case 4:  return .red
+        case 2:  return .orange
+        default: return .green
+        }
     }
 }
 
@@ -435,6 +597,58 @@ struct CLIUsageRow: View {
     }
 }
 
+/// 當月月曆，今天以強調色標示
+struct MonthCalendarView: View {
+    let date: Date
+    private let cal = Calendar.current
+    private let weekdaySymbols = ["日", "一", "二", "三", "四", "五", "六"]
+
+    var body: some View {
+        let cells = monthCells()
+        let columns = Array(repeating: GridItem(.flexible(), spacing: 2), count: 7)
+        VStack(spacing: 3) {
+            HStack(spacing: 0) {
+                ForEach(weekdaySymbols, id: \.self) { sym in
+                    Text(sym)
+                        .font(.system(size: 8))
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            LazyVGrid(columns: columns, spacing: 3) {
+                ForEach(Array(cells.enumerated()), id: \.offset) { _, day in
+                    if let day = day {
+                        Text("\(day)")
+                            .font(.system(size: 9))
+                            .monospacedDigit()
+                            .frame(maxWidth: .infinity, minHeight: 16)
+                            .background(isToday(day) ? Color.accentColor : Color.clear)
+                            .foregroundColor(isToday(day) ? .white : .primary)
+                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                    } else {
+                        Text("").frame(maxWidth: .infinity, minHeight: 16)
+                    }
+                }
+            }
+        }
+    }
+
+    /// 回傳當月各格：前導空白為 nil，其餘為日期數字
+    private func monthCells() -> [Int?] {
+        guard let range = cal.range(of: .day, in: .month, for: date),
+              let first = cal.date(from: cal.dateComponents([.year, .month], from: date))
+        else { return [] }
+        let leading = cal.component(.weekday, from: first) - 1   // 週日 = 1
+        var cells = [Int?](repeating: nil, count: leading)
+        cells.append(contentsOf: range.map { Optional($0) })
+        return cells
+    }
+
+    private func isToday(_ day: Int) -> Bool {
+        cal.component(.day, from: date) == day
+    }
+}
+
 // MARK: - Sub-views
 
 struct StatCard<Content: View>: View {
@@ -523,6 +737,22 @@ struct NetStat: View {
 }
 
 // MARK: - Formatters
+
+private let zhTW = Locale(identifier: "zh_Hant_TW")
+
+func fullDateString(_ d: Date) -> String {
+    let f = DateFormatter()
+    f.locale = zhTW
+    f.dateFormat = "yyyy 年 M 月 d 日"
+    return f.string(from: d)
+}
+
+func weekdayString(_ d: Date) -> String {
+    let f = DateFormatter()
+    f.locale = zhTW
+    f.dateFormat = "EEEE"
+    return f.string(from: d)
+}
 
 func formatBytes(_ bytes: UInt64) -> String {
     let gb = Double(bytes) / 1_073_741_824

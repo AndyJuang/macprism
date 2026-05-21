@@ -2,7 +2,7 @@ import Foundation
 import SwiftUI
 
 enum StatItem: String, CaseIterable, Identifiable {
-    case cpu, memory, network, gpu, disk, battery, topProcess, tokenUsage
+    case cpu, memory, network, gpu, disk, battery, sensors, topProcess, tokenUsage, date
 
     var id: String { rawValue }
 
@@ -14,8 +14,10 @@ enum StatItem: String, CaseIterable, Identifiable {
         case .gpu:        return "GPU"
         case .disk:       return "磁碟"
         case .battery:    return "電池"
+        case .sensors:    return "感測器"
         case .topProcess: return "行程排行"
         case .tokenUsage: return "AI 額度"
+        case .date:       return "日期"
         }
     }
 
@@ -27,8 +29,10 @@ enum StatItem: String, CaseIterable, Identifiable {
         case .gpu:        return "display"
         case .disk:       return "internaldrive"
         case .battery:    return "battery.100"
+        case .sensors:    return "thermometer"
         case .topProcess: return "list.bullet.rectangle"
         case .tokenUsage: return "speedometer"
+        case .date:       return "calendar"
         }
     }
 
