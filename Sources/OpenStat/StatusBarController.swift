@@ -69,6 +69,11 @@ class StatusBarController: NSObject, NSMenuDelegate {
             .dropFirst()
             .sink { [weak self] _ in self?.refreshStatusBar() }
             .store(in: &cancellables)
+
+        settings.$tokenMenuBarSource
+            .dropFirst()
+            .sink { [weak self] _ in self?.refreshStatusBar() }
+            .store(in: &cancellables)
     }
 
     private func refreshStatusBar() {
@@ -95,8 +100,9 @@ class StatusBarController: NSObject, NSMenuDelegate {
         if items.contains(.battery) && monitor.battery.present {
             parts.append("\(monitor.battery.percent)%" + (monitor.battery.isCharging ? "⚡" : ""))
         }
-        if items.contains(.tokenUsage), let remaining = tokenMonitor.lowestRemaining {
-            parts.append("AI" + String(format: "%3.0f%%", remaining))
+        if items.contains(.tokenUsage),
+           let text = tokenMonitor.menuBarText(for: settings.tokenMenuBarSource) {
+            parts.append(text)
         }
 
         // 全部關閉時退回顯示圖示，避免 menu bar 變空白

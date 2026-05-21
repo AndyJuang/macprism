@@ -114,7 +114,7 @@ openstat/
 
 **Top Process：** `proc_listpids` + `proc_pidinfo(PROC_PIDTASKINFO)` 取得各行程 CPU 累計時間與 RSS，依兩次取樣 delta 算出 CPU%。
 
-**AI 額度：** Codex 直接讀 `~/.codex/sessions` 最新 rollout 檔內建的 rate-limit 快照（完全離線）；Claude Code 本機無此資料，改呼叫 `api.anthropic.com/api/oauth/usage`，OAuth 憑證取自 Keychain。兩者皆聚焦「目前 5 小時滾動視窗」，每 60 秒刷新（Claude API 內部節流至 5 分鐘）。
+**AI 額度：** Codex 直接讀 `~/.codex/sessions` 最新 rollout 檔內建的 rate-limit 快照（完全離線）。Claude Code 優先讀 `~/.claude/usage-status.json` —— 由 `statusline.sh` 擷取 statusLine 的 `rate_limits` 寫出（同樣離線、不動狀態列輸出）；缺檔或快照超過 6 小時才退回呼叫 `api.anthropic.com/api/oauth/usage`（OAuth 憑證取自 Keychain）。兩者皆聚焦「目前 5 小時滾動視窗」，每 60 秒刷新（API 退回路徑內部節流至 5 分鐘）。
 
 ## 系統需求
 

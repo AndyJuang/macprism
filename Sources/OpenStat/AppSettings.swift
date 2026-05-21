@@ -36,6 +36,21 @@ enum StatItem: String, CaseIterable, Identifiable {
     var canShowInMenuBar: Bool { self != .topProcess }
 }
 
+/// menu bar 的「AI 額度」要顯示哪一個 CLI 的剩餘額度
+enum TokenMenuBarSource: String, CaseIterable, Identifiable {
+    case lowest, claude, codex
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .lowest: return "兩者取較低"
+        case .claude: return "Claude Code"
+        case .codex:  return "Codex"
+        }
+    }
+}
+
 final class AppSettings: ObservableObject {
     static let shared = AppSettings()
 
@@ -52,11 +67,17 @@ final class AppSettings: ObservableObject {
         didSet { saveSet(panelEnabled, key: Keys.panelEnabled) }
     }
 
+    /// menu bar 的「AI 額度」顯示來源
+    @Published var tokenMenuBarSource: TokenMenuBarSource {
+        didSet { UserDefaults.standard.set(tokenMenuBarSource.rawValue, forKey: Keys.tokenSource) }
+    }
+
     private enum Keys {
         static let menuBar      = "openstat.settings.menuBarItems"
         static let panelOrder   = "openstat.settings.panelOrder"
         static let panelEnabled = "openstat.settings.panelEnabled"
         static let legacyPanel  = "openstat.settings.panelItems"  // 舊版鍵
+        static let tokenSource  = "openstat.settings.tokenMenuBarSource"
     }
 
     /// 預設：menu bar 顯示 CPU / 記憶體 / 網路 / 電池；面板依 allCases 順序、全部啟用
@@ -70,6 +91,9 @@ final class AppSettings: ObservableObject {
         let (order, enabled) = AppSettings.loadPanel()
         self.panelOrder   = order
         self.panelEnabled = enabled
+
+        let rawSource = UserDefaults.standard.string(forKey: Keys.tokenSource) ?? ""
+        self.tokenMenuBarSource = TokenMenuBarSource(rawValue: rawSource) ?? .lowest
     }
 
     func toggleMenuBar(_ item: StatItem) {
@@ -87,9 +111,10 @@ final class AppSettings: ObservableObject {
     }
 
     func resetToDefaults() {
-        menuBarItems  = AppSettings.defaultMenuBar
-        panelOrder    = AppSettings.defaultPanelOrder
-        panelEnabled  = AppSettings.defaultPanelEnabled
+        menuBarItems       = AppSettings.defaultMenuBar
+        panelOrder         = AppSettings.defaultPanelOrder
+        panelEnabled       = AppSettings.defaultPanelEnabled
+        tokenMenuBarSource = .lowest
     }
 
     // MARK: - Persistence

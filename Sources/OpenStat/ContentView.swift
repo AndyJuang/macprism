@@ -407,6 +407,9 @@ struct CLIUsageRow: View {
                             .monospacedDigit()
                     }
                 }
+                Text(usage.status)
+                    .font(.system(size: 8))
+                    .foregroundColor(.secondary)
             }
         }
     }

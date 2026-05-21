@@ -28,6 +28,21 @@ struct SettingsView: View {
                 .toggleStyle(.checkbox)
             }
 
+            Divider()
+
+            HStack {
+                Label("AI 額度顯示", systemImage: "speedometer")
+                Spacer()
+                Picker("", selection: $settings.tokenMenuBarSource) {
+                    ForEach(TokenMenuBarSource.allCases) { source in
+                        Text(source.label).tag(source)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 150)
+                .disabled(!settings.menuBarItems.contains(.tokenUsage))
+            }
+
             Spacer()
             footer
         }

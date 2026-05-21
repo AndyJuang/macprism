@@ -9,9 +9,9 @@
     <key>CFBundleName</key>
     <string>OpenStat</string>
     <key>CFBundleVersion</key>
-    <string>1.4</string>
+    <string>1.5</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.4</string>
+    <string>1.5</string>
     <key>LSUIElement</key>
     <true/>
     <key>NSPrincipalClass</key>
