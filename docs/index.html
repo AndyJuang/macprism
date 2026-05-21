@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MacPrism — 把整台 Mac 收進選單列</title>
+<meta name="description" content="MacPrism 是輕量原生的 macOS 選單列系統監控工具：CPU、GPU、記憶體、磁碟、網路、感測器、電池，連 Claude Code / Codex 的 AI token 額度都一覽無遺。">
+<meta property="og:title" content="MacPrism — macOS 選單列系統監控">
+<meta property="og:description" content="一塊稜鏡，看穿你的 Mac。CPU、GPU、感測器到 AI CLI 額度，全在選單列。">
+<meta property="og:type" content="website">
+<link rel="icon" href="icon.png">
+<style>
+  :root {
+    --bg: #0c0e14;
+    --bg-soft: #141821;
+    --card: #1a1f2b;
+    --line: #272d3a;
+    --text: #e8ebf2;
+    --muted: #9aa3b5;
+    --prism: linear-gradient(120deg, #f87171, #fbbf24, #34d399, #38bdf8, #818cf8);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang TC", "Noto Sans TC", sans-serif;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; text-decoration: none; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; }
+
+  /* 導覽列 */
+  nav {
+    position: sticky; top: 0; z-index: 50;
+    background: rgba(12,14,20,.82);
+    backdrop-filter: saturate(180%) blur(14px);
+    border-bottom: 1px solid var(--line);
+  }
+  nav .wrap { display: flex; align-items: center; justify-content: space-between; height: 60px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; }
+  .brand img { width: 26px; height: 26px; border-radius: 6px; }
+  .nav-links { display: flex; gap: 26px; font-size: 14px; color: var(--muted); }
+  .nav-links a:hover { color: var(--text); }
+
+  /* 共用 */
+  .prism-text {
+    background: var(--prism);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 13px 26px; border-radius: 12px; font-weight: 600; font-size: 15px;
+    transition: transform .15s ease, box-shadow .15s ease;
+  }
+  .btn-primary { background: var(--prism); color: #0c0e14; }
+  .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 10px 30px rgba(56,189,248,.25); }
+  .btn-ghost { border: 1px solid var(--line); color: var(--text); }
+  .btn-ghost:hover { border-color: #3a4252; background: var(--bg-soft); }
+  section { padding: 88px 0; }
+  .eyebrow { font-size: 13px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+  h2 { font-size: 32px; font-weight: 800; margin: 12px 0 14px; letter-spacing: -.02em; }
+  .section-sub { color: var(--muted); max-width: 560px; }
+
+  /* Hero */
+  .hero { padding: 90px 0 70px; text-align: center; position: relative; overflow: hidden; }
+  .hero::before {
+    content: ""; position: absolute; top: -180px; left: 50%; transform: translateX(-50%);
+    width: 760px; height: 420px; background: var(--prism); filter: blur(150px); opacity: .22;
+  }
+  .hero-icon { width: 96px; height: 96px; border-radius: 22px; position: relative;
+    box-shadow: 0 20px 50px rgba(0,0,0,.5); }
+  .hero h1 { font-size: 60px; font-weight: 850; letter-spacing: -.03em; margin: 26px 0 6px; }
+  .hero .tagline { font-size: 22px; font-weight: 600; }
+  .hero p.lead { color: var(--muted); font-size: 16px; max-width: 600px; margin: 16px auto 0; }
+  .cta { display: flex; gap: 14px; justify-content: center; margin-top: 32px; flex-wrap: wrap; }
+  .meta { margin-top: 16px; font-size: 13px; color: var(--muted); }
+
+  /* 面板示意 */
+  .panel {
+    width: 320px; margin: 56px auto 0; text-align: left;
+    background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+    box-shadow: 0 30px 70px rgba(0,0,0,.55); overflow: hidden;
+  }
+  .panel-head { display: flex; justify-content: space-between; align-items: center;
+    padding: 11px 14px; border-bottom: 1px solid var(--line); font-size: 13px; font-weight: 700; }
+  .panel-head .dot { color: #818cf8; }
+  .panel-body { padding: 12px; display: flex; flex-direction: column; gap: 9px; }
+  .stat {
+    background: var(--bg-soft); border: 1px solid var(--line);
+    border-radius: 10px; padding: 10px 12px;
+  }
+  .stat-row { display: flex; justify-content: space-between; align-items: center; font-size: 12px; }
+  .stat-row .lbl { color: var(--muted); }
+  .stat-row .val { font-variant-numeric: tabular-nums; font-weight: 700; }
+  .spark { display: block; width: 100%; height: 30px; margin-top: 6px; }
+  .donut-row { display: flex; align-items: center; gap: 12px; }
+  .donut {
+    width: 46px; height: 46px; border-radius: 50%;
+    background: conic-gradient(#f87171 0 72%, #2c3340 72% 100%);
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .donut::before { content: ""; width: 33px; height: 33px; border-radius: 50%; background: var(--bg-soft); position: absolute; }
+  .donut span { position: relative; font-size: 11px; font-weight: 700; }
+  .bar { height: 6px; border-radius: 3px; background: #2c3340; margin-top: 7px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; border-radius: 3px; background: var(--prism); }
+
+  /* 功能格 */
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 44px; }
+  .feature {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 22px;
+    transition: transform .15s ease, border-color .15s ease;
+  }
+  .feature:hover { transform: translateY(-3px); border-color: #36405220; }
+  .feature .ic {
+    width: 40px; height: 40px; border-radius: 10px; display: flex; align-items: center;
+    justify-content: center; font-size: 20px; background: var(--bg-soft);
+    border: 1px solid var(--line); margin-bottom: 14px;
+  }
+  .feature h3 { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
+  .feature p { font-size: 13.5px; color: var(--muted); }
+
+  /* 焦點區 */
+  .spotlight { background: var(--bg-soft); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  .spotlight .wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 50px; align-items: center; }
+  .spotlight ul { list-style: none; margin-top: 18px; display: flex; flex-direction: column; gap: 12px; }
+  .spotlight li { display: flex; gap: 10px; font-size: 14.5px; color: var(--muted); }
+  .spotlight li b { color: var(--text); font-weight: 600; }
+  .check { color: #34d399; flex-shrink: 0; font-weight: 800; }
+  .quota-card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 24px;
+  }
+  .quota-card .q { margin-bottom: 18px; }
+  .quota-card .q:last-child { margin-bottom: 0; }
+  .quota-card .q-top { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 7px; }
+  .quota-card .q-top b { font-weight: 700; }
+  .quota-card .q-rem { color: #34d399; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+  /* 步驟 */
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-top: 40px; }
+  .step { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 24px; }
+  .step .n {
+    width: 30px; height: 30px; border-radius: 8px; background: var(--prism); color: #0c0e14;
+    font-weight: 800; display: flex; align-items: center; justify-content: center; margin-bottom: 14px;
+  }
+  .step h3 { font-size: 15px; margin-bottom: 5px; }
+  .step p { font-size: 13.5px; color: var(--muted); }
+  .step code { background: var(--bg); padding: 1px 6px; border-radius: 5px; font-size: 12px; }
+
+  /* 規格 */
+  .specs { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 36px; }
+  .spec { background: var(--card); border: 1px solid var(--line); border-radius: 999px;
+    padding: 8px 16px; font-size: 13px; color: var(--muted); }
+  .spec b { color: var(--text); }
+
+  footer { border-top: 1px solid var(--line); padding: 40px 0; color: var(--muted); font-size: 13px; }
+  footer .wrap { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+  footer a { color: var(--muted); }
+  footer a:hover { color: var(--text); }
+
+  @media (max-width: 760px) {
+    .hero h1 { font-size: 42px; }
+    .grid, .steps { grid-template-columns: 1fr; }
+    .spotlight .wrap { grid-template-columns: 1fr; gap: 32px; }
+    .nav-links { display: none; }
+    h2 { font-size: 26px; }
+  }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="#top"><img src="icon.png" alt="MacPrism"> MacPrism</a>
+    <div class="nav-links">
+      <a href="#features">功能</a>
+      <a href="#quota">AI 額度</a>
+      <a href="#install">安裝</a>
+      <a href="https://github.com/AndyJuang/macprism">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="wrap">
+    <img class="hero-icon" src="icon.png" alt="MacPrism 圖示">
+    <h1><span class="prism-text">MacPrism</span></h1>
+    <div class="tagline">一塊稜鏡，看穿你的 Mac</div>
+    <p class="lead">
+      輕量原生的 macOS 選單列系統監控工具。CPU、GPU、記憶體、磁碟、網路、感測器、電池 ——
+      連 Claude Code、Codex 的 AI token 額度都一覽無遺。
+    </p>
+    <div class="cta">
+      <a class="btn btn-primary" href="https://github.com/AndyJuang/macprism/releases/latest">↓ 下載 MacPrism</a>
+      <a class="btn btn-ghost" href="https://github.com/AndyJuang/macprism">在 GitHub 上查看</a>
+    </div>
+    <div class="meta">免費開源 · macOS 13+ · Apple Silicon 與 Intel · MIT 授權</div>
+
+    <!-- 選單列面板示意 -->
+    <div class="panel">
+      <div class="panel-head"><span><span class="dot">◆</span> MacPrism</span><span style="color:var(--muted);font-weight:500">結束</span></div>
+      <div class="panel-body">
+        <div class="stat">
+          <div class="stat-row"><span class="lbl">CPU 整體使用率</span><span class="val" style="color:#34d399">23%</span></div>
+          <svg class="spark" viewBox="0 0 280 30" preserveAspectRatio="none">
+            <polyline fill="none" stroke="#34d399" stroke-width="2"
+              points="0,24 28,18 56,22 84,10 112,15 140,6 168,17 196,12 224,20 252,9 280,14"/>
+          </svg>
+        </div>
+        <div class="stat">
+          <div class="stat-row"><span class="lbl">AI 額度 · Claude Code</span><span class="val q-rem" style="color:#34d399">剩 86%</span></div>
+          <div class="bar"><i style="width:14%"></i></div>
+          <div class="stat-row" style="margin-top:6px"><span class="lbl" style="font-size:10px">16:10 重置 · 還有 2 時 5 分</span></div>
+        </div>
+        <div class="stat">
+          <div class="stat-row"><span class="lbl">感測器 · 最高溫度</span><span class="val" style="color:#fbbf24">52°C</span></div>
+        </div>
+        <div class="stat">
+          <div class="donut-row">
+            <div class="donut"><span>72%</span></div>
+            <div>
+              <div style="font-weight:700;font-size:12px">Macintosh HD</div>
+              <div style="font-size:11px;color:var(--muted)">已用 712 GB · 共 995 GB</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<section id="features">
+  <div class="wrap">
+    <div class="eyebrow">完整覆蓋</div>
+    <h2>一個選單列圖示，<span class="prism-text">九種洞察</span></h2>
+    <p class="section-sub">所有指標都用原生 IOKit / Darwin API 直接取得，不背景吃資源、不上傳任何資料。</p>
+    <div class="grid">
+      <div class="feature"><div class="ic">⚡</div><h3>CPU</h3><p>整體與各核心使用率、load average、開機時間，附即時走勢圖。</p></div>
+      <div class="feature"><div class="ic">🧠</div><h3>記憶體</h3><p>Active / Wired / Compressed 分層、Swap 用量與記憶體壓力。</p></div>
+      <div class="feature"><div class="ic">🎮</div><h3>GPU</h3><p>使用率與配置記憶體，Apple Silicon 與 Intel 皆支援。</p></div>
+      <div class="feature"><div class="ic">💾</div><h3>磁碟</h3><p>讀寫速率與圓環容量圖，依實體磁碟呈現、不被 APFS 磁區洗版。</p></div>
+      <div class="feature"><div class="ic">🌐</div><h3>網路</h3><p>上下載速率、區域／公開 IP 與地理位置、App 流量排行、連線清單。</p></div>
+      <div class="feature"><div class="ic">🌡️</div><h3>感測器</h3><p>溫度感測器與風扇轉速，掌握機器發熱狀況。</p></div>
+      <div class="feature"><div class="ic">🔋</div><h3>電池</h3><p>電量、功率、循環次數、健康度，連藍牙裝置電量一起顯示。</p></div>
+      <div class="feature"><div class="ic">◇</div><h3>AI 額度</h3><p>Claude Code 與 Codex 目前 5 小時視窗的剩餘配額與重置倒數。</p></div>
+      <div class="feature"><div class="ic">📅</div><h3>日期</h3><p>選單列日期，下拉面板附當月月曆。</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="spotlight" id="quota">
+  <div class="wrap">
+    <div>
+      <div class="eyebrow">獨家特色</div>
+      <h2>不只看硬體，<br><span class="prism-text">還看你的 AI 額度</span></h2>
+      <p class="section-sub">市面上的系統監控工具到處都是，但 MacPrism 是少數會把你 AI CLI 的用量也一起盯著的。</p>
+      <ul>
+        <li><span class="check">✓</span><span><b>Claude Code</b> —— 目前 5 小時滾動視窗的剩餘額度、重置倒數、每週用量。</span></li>
+        <li><span class="check">✓</span><span><b>Codex</b> —— 完全離線，直接讀本機 rollout 檔內建的 rate-limit 快照。</span></li>
+        <li><span class="check">✓</span><span><b>本機優先</b> —— 優先讀 statusLine 快照，缺檔才回退官方 API。</span></li>
+        <li><span class="check">✓</span><span>選單列可自選顯示哪一個 CLI 的剩餘額度，一眼示警。</span></li>
+      </ul>
+    </div>
+    <div class="quota-card">
+      <div class="q">
+        <div class="q-top"><b>Claude Code</b><span class="q-rem">剩 86%</span></div>
+        <div class="bar"><i style="width:14%"></i></div>
+        <div style="font-size:11px;color:var(--muted);margin-top:6px">16:10 重置 · 還有 2 時 5 分 · 本週已用 23%</div>
+      </div>
+      <div class="q">
+        <div class="q-top"><b>Codex</b><span class="q-rem">剩 91%</span></div>
+        <div class="bar"><i style="width:9%"></i></div>
+        <div style="font-size:11px;color:var(--muted);margin-top:6px">15:53 重置 · 還有 1 時 40 分 · 本週已用 12%</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="eyebrow">細節控</div>
+    <h2>看得清楚，<span class="prism-text">才叫監控</span></h2>
+    <p class="section-sub">下拉面板每一項都經過易讀性打磨。</p>
+    <div class="grid">
+      <div class="feature"><div class="ic">📈</div><h3>走勢圖含刻度</h3><p>CPU / GPU / 記憶體 / 網路皆附迷你折線，帶格線與 Y 軸刻度，一眼讀出數值區間。</p></div>
+      <div class="feature"><div class="ic">🎛️</div><h3>選單列可自訂</h3><p>自由開關各項指標、可顯示 CPU 走勢小圖；等寬字型不會讓選單列跳動。</p></div>
+      <div class="feature"><div class="ic">🪶</div><h3>原生輕量</h3><p>純 Swift + IOKit，沒有 Electron、沒有背景常駐服務、不連雲端。</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="spotlight" id="install">
+  <div class="wrap" style="display:block">
+    <div class="eyebrow">三步上手</div>
+    <h2>一分鐘<span class="prism-text">裝好</span></h2>
+    <div class="steps">
+      <div class="step"><div class="n">1</div><h3>下載 DMG</h3><p>到 <a href="https://github.com/AndyJuang/macprism/releases/latest" style="color:#38bdf8">Releases</a> 下載最新的 <code>MacPrism.dmg</code>。</p></div>
+      <div class="step"><div class="n">2</div><h3>拖入 Applications</h3><p>掛載 DMG，把 <b>MacPrism.app</b> 拖進「應用程式」資料夾。</p></div>
+      <div class="step"><div class="n">3</div><h3>開啟</h3><p>首次開啟若擋下，至<b>系統設定 → 隱私權與安全性 → 仍要開啟</b>。</p></div>
+    </div>
+    <div class="specs">
+      <div class="spec">系統需求 <b>macOS 13 Ventura+</b></div>
+      <div class="spec">晶片 <b>Apple Silicon / Intel</b></div>
+      <div class="spec">語言 <b>Swift + C</b></div>
+      <div class="spec">授權 <b>MIT</b></div>
+      <div class="spec">大小 <b>約 2 MB</b></div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div>© 2026 莊哲昀（Andy Juang） · MIT License</div>
+    <div>
+      <a href="https://github.com/AndyJuang/macprism">GitHub</a> ·
+      <a href="https://github.com/AndyJuang/macprism/releases">Releases</a> ·
+      <a href="https://github.com/AndyJuang/macprism/issues">回報問題</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
