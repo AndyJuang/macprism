@@ -2,23 +2,23 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleExecutable</key>
-    <string>MacPrism</string>
-    <key>CFBundleIdentifier</key>
-    <string>com.macprism.app</string>
-    <key>CFBundleName</key>
-    <string>MacPrism</string>
-    <key>CFBundleVersion</key>
-    <string>1.9</string>
-    <key>CFBundleShortVersionString</key>
-    <string>1.9</string>
-    <key>LSUIElement</key>
-    <true/>
-    <key>NSPrincipalClass</key>
-    <string>NSApplication</string>
-    <key>NSHighResolutionCapable</key>
-    <true/>
-    <key>CFBundleIconFile</key>
-    <string>AppIcon</string>
+	<key>CFBundleExecutable</key>
+	<string>MacPrism</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.macprism.app</string>
+	<key>CFBundleName</key>
+	<string>MacPrism</string>
+	<key>CFBundleShortVersionString</key>
+	<string>2.0</string>
+	<key>CFBundleVersion</key>
+	<string>1.9</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
 </dict>
 </plist>

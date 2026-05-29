@@ -737,16 +737,44 @@ struct CLIUsageRow: View {
     }
 }
 
-/// 當月月曆，今天以強調色標示
+/// 當月月曆，今天以強調色標示，可切換前後月份
 struct MonthCalendarView: View {
     let date: Date
+    @State private var displayedMonth: Date
     private let cal = Calendar.current
     private let weekdaySymbols = ["日", "一", "二", "三", "四", "五", "六"]
+
+    init(date: Date) {
+        self.date = date
+        _displayedMonth = State(initialValue: date)
+    }
 
     var body: some View {
         let cells = monthCells()
         let columns = Array(repeating: GridItem(.flexible(), spacing: 2), count: 7)
         VStack(spacing: 3) {
+            HStack(spacing: 4) {
+                Button(action: { changeMonth(by: -1) }) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+                .help("上個月")
+
+                Text(monthLabel)
+                    .font(.system(size: 11, weight: .medium))
+                    .frame(maxWidth: .infinity)
+                    .contentShape(Rectangle())
+                    .onTapGesture { displayedMonth = date }
+                    .help("回到本月")
+
+                Button(action: { changeMonth(by: 1) }) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+                .help("下個月")
+            }
             HStack(spacing: 0) {
                 ForEach(weekdaySymbols, id: \.self) { sym in
                     Text(sym)
@@ -773,10 +801,23 @@ struct MonthCalendarView: View {
         }
     }
 
+    private var monthLabel: String {
+        let f = DateFormatter()
+        f.locale = zhTW
+        f.dateFormat = "yyyy 年 M 月"
+        return f.string(from: displayedMonth)
+    }
+
+    private func changeMonth(by delta: Int) {
+        if let next = cal.date(byAdding: .month, value: delta, to: displayedMonth) {
+            displayedMonth = next
+        }
+    }
+
     /// 回傳當月各格：前導空白為 nil，其餘為日期數字
     private func monthCells() -> [Int?] {
-        guard let range = cal.range(of: .day, in: .month, for: date),
-              let first = cal.date(from: cal.dateComponents([.year, .month], from: date))
+        guard let range = cal.range(of: .day, in: .month, for: displayedMonth),
+              let first = cal.date(from: cal.dateComponents([.year, .month], from: displayedMonth))
         else { return [] }
         let leading = cal.component(.weekday, from: first) - 1   // 週日 = 1
         var cells = [Int?](repeating: nil, count: leading)
@@ -784,8 +825,10 @@ struct MonthCalendarView: View {
         return cells
     }
 
+    /// 僅當顯示的月份就是今天所在月份時，才標示今天
     private func isToday(_ day: Int) -> Bool {
-        cal.component(.day, from: date) == day
+        cal.isDate(displayedMonth, equalTo: date, toGranularity: .month)
+            && cal.component(.day, from: date) == day
     }
 }
 
