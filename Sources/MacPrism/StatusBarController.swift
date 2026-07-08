@@ -168,6 +168,7 @@ class StatusBarController: NSObject, NSMenuDelegate {
     private func openPopover(_ sender: NSStatusBarButton) {
         tokenMonitor.refresh()
         networkMonitor.refresh()
+        monitor.update()   // 開啟瞬間補一次最新數據
         popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
         eventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
             self?.closePopover()

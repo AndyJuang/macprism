@@ -68,6 +68,9 @@ final class TokenUsageMonitor: ObservableObject {
 
     private var lastClaudeFetch: Date = .distantPast
     private let claudeInterval: TimeInterval = 300   // Claude API 最多 5 分鐘一次
+    /// 使用者按過「拒絕」鑰匙圈授權後設為 true，本次啟動不再嘗試讀鑰匙圈，避免一直跳窗。
+    /// （menu bar 的額度仍可由本機快照檔顯示，不受影響）
+    private var claudeKeychainDenied = false
 
     /// 觸發刷新。Codex 永遠重讀本機檔；Claude 先讀本機快照，缺檔才打 API（5 分鐘節流）。
     func refresh(force: Bool = false) {
@@ -82,7 +85,9 @@ final class TokenUsageMonitor: ObservableObject {
                 return
             }
             // 2) 缺檔或過期 → 退回呼叫官方 API，但節流至 5 分鐘一次
+            //    且本次啟動曾被拒絕鑰匙圈授權時直接略過，不再跳窗
             let shouldCallAPI = await MainActor.run { () -> Bool in
+                if self.claudeKeychainDenied { return false }
                 if force || Date().timeIntervalSince(self.lastClaudeFetch) >= self.claudeInterval {
                     self.lastClaudeFetch = Date()
                     return true
@@ -90,8 +95,11 @@ final class TokenUsageMonitor: ObservableObject {
                 return false
             }
             guard shouldCallAPI else { return }
-            let result = await Self.fetchClaudeUsageFromAPI()
-            await MainActor.run { self.claude = result }
+            let (result, denied) = await Self.fetchClaudeUsageFromAPI()
+            await MainActor.run {
+                self.claude = result
+                if denied { self.claudeKeychainDenied = true }
+            }
         }
     }
 
@@ -128,11 +136,17 @@ final class TokenUsageMonitor: ObservableObject {
 
     // MARK: - Claude — 退回呼叫官方 /usage API
 
-    private static func fetchClaudeUsageFromAPI() async -> CLIUsage {
+    /// 回傳 (用量, keychainDenied)。denied 為 true 時呼叫端應停止本 session 後續鑰匙圈嘗試。
+    private static func fetchClaudeUsageFromAPI() async -> (usage: CLIUsage, keychainDenied: Bool) {
         var u = CLIUsage(name: "Claude Code")
-        guard let token = readClaudeToken() else {
+        let (maybeToken, denied) = readClaudeToken()
+        if denied {
+            u.status = "已略過鑰匙圈授權（本次啟動已拒絕）"
+            return (u, true)
+        }
+        guard let token = maybeToken else {
             u.status = "找不到 Claude 憑證（請先在 Claude Code 登入）"
-            return u
+            return (u, false)
         }
 
         var req = URLRequest(url: URL(string: "https://api.anthropic.com/api/oauth/usage")!)
@@ -144,14 +158,14 @@ final class TokenUsageMonitor: ObservableObject {
         do {
             let (data, resp) = try await URLSession.shared.data(for: req)
             guard let http = resp as? HTTPURLResponse else {
-                u.status = "回應異常"; return u
+                u.status = "回應異常"; return (u, false)
             }
             if http.statusCode == 401 {
-                u.status = "憑證已過期，請重新登入 Claude Code"; return u
+                u.status = "憑證已過期，請重新登入 Claude Code"; return (u, false)
             }
             guard http.statusCode == 200,
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                u.status = "API 錯誤（\(http.statusCode)）"; return u
+                u.status = "API 錯誤（\(http.statusCode)）"; return (u, false)
             }
 
             if let fiveHour = json["five_hour"] as? [String: Any] {
@@ -164,16 +178,18 @@ final class TokenUsageMonitor: ObservableObject {
             }
             u.available = true
             u.status = "API · 已更新"
-            return u
+            return (u, false)
         } catch {
             u.status = "連線失敗"
-            return u
+            return (u, false)
         }
     }
 
     /// 從 macOS Keychain 取出 Claude Code 的 OAuth access token。
     /// 首次存取時系統會跳出鑰匙圈授權提示，按「允許」即可。
-    private static func readClaudeToken() -> String? {
+    /// 回傳 (token, denied)：denied 為 true 表示使用者按了「拒絕」或授權失敗，
+    /// 呼叫端應停止本 session 後續嘗試，避免每次刷新都跳窗。
+    private static func readClaudeToken() -> (token: String?, denied: Bool) {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: "Claude Code-credentials",
@@ -181,13 +197,19 @@ final class TokenUsageMonitor: ObservableObject {
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
         var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+
+        // 使用者按「拒絕」或鑰匙圈授權失敗 → 標記 denied，讓上層不再重試
+        if status == errSecUserCanceled || status == errSecAuthFailed || status == errSecInteractionNotAllowed {
+            return (nil, true)
+        }
+        guard status == errSecSuccess,
               let data = item as? Data,
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let oauth = obj["claudeAiOauth"] as? [String: Any],
               let token = oauth["accessToken"] as? String
-        else { return nil }
-        return token
+        else { return (nil, false) }
+        return (token, false)
     }
 
     // MARK: - Codex（讀本機 rollout 檔內建的 rate-limit 快照）

@@ -6,6 +6,10 @@ struct ContentView: View {
     @ObservedObject var networkMonitor: NetworkInfoMonitor
     @ObservedObject var settings: AppSettings
     @State private var topMode: TopMode = .cpu
+    @State private var inspectedCore: CoreInspect?
+
+    /// 被雙擊的核心編號（1-based）；用於彈出 Top 行程小面板
+    struct CoreInspect: Identifiable { let id: Int }
 
     enum TopMode: String, CaseIterable { case cpu = "CPU", memory = "記憶體" }
 
@@ -108,7 +112,13 @@ struct ContentView: View {
                     LazyVGrid(columns: columns, spacing: 4) {
                         ForEach(Array(monitor.cpuCores.enumerated()), id: \.offset) { i, usage in
                             CoreBar(index: i + 1, usage: usage, theme: theme)
+                                .contentShape(Rectangle())
+                                .onTapGesture(count: 2) { inspectedCore = CoreInspect(id: i + 1) }
+                                .help("雙擊查看目前 CPU 用量最高的行程")
                         }
+                    }
+                    .popover(item: $inspectedCore, arrowEdge: .bottom) { core in
+                        coreInspectPopover(core.id)
                     }
                 }
 
@@ -119,6 +129,48 @@ struct ContentView: View {
                 }
             }
         }
+    }
+
+    /// 雙擊核心後的彈出面板：列出目前 CPU 用量最高的行程。
+    /// 註：macOS 無公開 API 可對應「thread ↔ 實體核心」，故顯示全系統 Top 行程而非該核心專屬執行緒。
+    @ViewBuilder
+    private func coreInspectPopover(_ core: Int) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "cpu")
+                    .font(.system(size: 13))
+                    .foregroundColor(.accentColor)
+                Text("核心 \(core)")
+                    .font(.system(size: 13, weight: .semibold))
+                Spacer()
+                Text(String(format: "%.0f%%", monitor.cpuCores.indices.contains(core - 1) ? monitor.cpuCores[core - 1] : 0))
+                    .font(.system(size: 13))
+                    .monospacedDigit()
+                    .foregroundColor(.secondary)
+            }
+
+            Text("目前 CPU 用量最高的行程")
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+
+            if monitor.topByCPU.isEmpty {
+                Text("尚無資料")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+            } else {
+                ForEach(monitor.topByCPU) { row in
+                    ProcessRowView(row: row, mode: .cpu)
+                }
+            }
+
+            Divider()
+            Text("註：macOS 不提供「執行緒 ↔ 核心」對應，故顯示全系統 Top 行程")
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(12)
+        .frame(width: 260)
     }
 
     // MARK: - Memory
@@ -335,6 +387,50 @@ struct ContentView: View {
                                 .foregroundColor(dev.percent <= 20 ? .red : .secondary)
                         }
                     }
+                }
+
+                if !monitor.iosDevices.isEmpty {
+                    Divider()
+                    ForEach(monitor.iosDevices) { dev in
+                        iosDeviceRow(dev)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func iosDeviceRow(_ dev: IOSDeviceRow) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: dev.kind.localizedCaseInsensitiveContains("ipad") ? "ipad" : "iphone")
+                .font(.system(size: 12))
+                .foregroundColor(.accentColor)
+            Text(dev.name)
+                .font(.system(size: 12))
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer()
+            if !dev.paired {
+                Text("請在裝置上點信任")
+                    .font(.system(size: 11))
+                    .foregroundColor(.orange)
+            } else {
+                if dev.fullyCharged {
+                    Text("已充飽")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                }
+                if dev.percent >= 0 {
+                    BatteryGlyph(percent: dev.percent,
+                                 charging: dev.isCharging && !dev.fullyCharged)
+                    Text("\(dev.percent)%")
+                        .font(.system(size: 12))
+                        .monospacedDigit()
+                        .foregroundColor(dev.percent <= 20 ? .red : .secondary)
+                } else {
+                    Text("讀取中…")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
                 }
             }
         }
@@ -994,6 +1090,47 @@ struct CoreBar: View {
             Text("\(index)")
                 .font(.system(size: 10))
                 .foregroundColor(.secondary)
+        }
+    }
+}
+
+/// 電池外框小圖示：依電量比例填滿，充電時顯示閃電。寬約 26pt，與 12–13pt 文字同高。
+struct BatteryGlyph: View {
+    let percent: Int        // 0-100
+    let charging: Bool
+
+    private let bodyW: CGFloat = 24
+    private let bodyH: CGFloat = 12
+
+    private var level: Int { max(0, min(100, percent)) }
+    private var fillColor: Color {
+        if charging { return .green }
+        if level <= 20 { return .red }
+        if level <= 40 { return .yellow }
+        return .green
+    }
+
+    var body: some View {
+        HStack(spacing: 1.5) {
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 3)
+                    .strokeBorder(Color.primary.opacity(0.45), lineWidth: 1)
+                    .frame(width: bodyW, height: bodyH)
+                RoundedRectangle(cornerRadius: 1.5)
+                    .fill(fillColor)
+                    .frame(width: max(2, (bodyW - 4) * CGFloat(level) / 100), height: bodyH - 4)
+                    .padding(.leading, 2)
+                if charging {
+                    Image(systemName: "bolt.fill")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(width: bodyW, height: bodyH)
+                }
+            }
+            // 正極凸點
+            RoundedRectangle(cornerRadius: 1)
+                .fill(Color.primary.opacity(0.45))
+                .frame(width: 2, height: 5)
         }
     }
 }

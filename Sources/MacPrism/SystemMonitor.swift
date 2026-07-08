@@ -1,6 +1,12 @@
 import Foundation
 import Darwin
+import os
 import MacPrismC
+
+/// 效能除錯用 logger。預設只在「單輪 update 超過門檻」時記錄，正常情況近乎零成本。
+/// 檢視方式：Console.app 篩 subsystem「com.macprism.app」、category「perf」，
+/// 或終端機 `log show --predicate 'subsystem == "com.macprism.app"' --last 10m`。
+private let perfLog = Logger(subsystem: "com.macprism.app", category: "perf")
 
 struct VolumeUsage: Identifiable {
     let id: String          // mount point
@@ -69,6 +75,16 @@ struct BTDeviceRow: Identifiable {
     let percent: Int
 }
 
+struct IOSDeviceRow: Identifiable {
+    let id = UUID()
+    let name: String
+    let kind: String        // iPhone / iPad
+    let percent: Int        // -1 = 未信任，無法取得
+    let isCharging: Bool
+    let fullyCharged: Bool
+    let paired: Bool        // false = 需在裝置上點「信任」
+}
+
 class SystemMonitor: ObservableObject {
     @Published var cpuUsage: Double = 0
     @Published var cpuCores: [Double] = []
@@ -96,6 +112,7 @@ class SystemMonitor: ObservableObject {
         timeToEmptyMin: -1, timeToFullMin: -1, powerWatts: 0, cycleCount: 0,
         currentCapacityWh: 0, maxCapacityWh: 0, healthPercent: 0)
     @Published var btDevices: [BTDeviceRow] = []
+    @Published var iosDevices: [IOSDeviceRow] = []
 
     // Top Process
     @Published var topByCPU: [ProcessRow] = []
@@ -151,21 +168,42 @@ class SystemMonitor: ObservableObject {
         let io = getDiskIOStats()
         previousDiskRead  = io.bytesRead
         previousDiskWrite = io.bytesWritten
+
+        // 開始監看 USB 連接的 iOS 裝置（須在具 run loop 的主執行緒）
+        startIOSDeviceMonitoring()
     }
 
     func update() {
-        updateCPU()
-        updateMemory()
-        updateNetwork()
-        updateDisk()
-        updateGPU()
-        updateBattery()
-        updateProcesses()
-        updateSensors()
-        updateLoadAndUptime()
-        if tickCount % 5 == 0 { updateBluetooth() }   // 藍牙約每 10 秒掃一次
+        let tickStart = DispatchTime.now()
+        var marks: [(String, Double)] = []
+        func step(_ name: String, _ body: () -> Void) {
+            let s = DispatchTime.now()
+            body()
+            let ms = Double(DispatchTime.now().uptimeNanoseconds &- s.uptimeNanoseconds) / 1_000_000
+            marks.append((name, ms))
+        }
+
+        step("cpu",     updateCPU)
+        step("memory",  updateMemory)
+        step("network", updateNetwork)
+        step("disk",    updateDisk)
+        step("gpu",     updateGPU)
+        step("battery", updateBattery)
+        step("processes", updateProcesses)   // 每 2 秒固定取樣，維持 CPU% 的 2 秒基準準確
+        step("sensors", updateSensors)
+        step("load",    updateLoadAndUptime)
+        if tickCount % 5 == 0 { step("bluetooth", updateBluetooth) }   // 藍牙約每 10 秒掃一次
+        if tickCount % 5 == 0 { step("iosDevices", updateIOSDevices) } // iOS 裝置約每 10 秒讀一次（含 USB session，勿高頻）
         tickCount += 1
         pushHistory()
+
+        let totalMs = Double(DispatchTime.now().uptimeNanoseconds &- tickStart.uptimeNanoseconds) / 1_000_000
+        if totalMs > 50 {   // 2 秒週期下，>50ms ≈ 持續 >2.5% CPU，值得記錄
+            let detail = marks.sorted { $0.1 > $1.1 }.prefix(3)
+                .map { "\($0.0) \(String(format: "%.1f", $0.1))ms" }
+                .joined(separator: ", ")
+            perfLog.warning("update tick \(String(format: "%.1f", totalMs), privacy: .public)ms 最重: \(detail, privacy: .public)")
+        }
     }
 
     /// 把本輪數值推入歷史環形緩衝
@@ -458,6 +496,34 @@ class SystemMonitor: ObservableObject {
             rows.append(BTDeviceRow(name: name, percent: Int(d.percent)))
         }
         btDevices = rows
+    }
+
+    // MARK: - iOS 裝置（USB 連接的 iPhone / iPad）
+
+    private func updateIOSDevices() {
+        var buf = [IOSDeviceInfo](repeating: IOSDeviceInfo(), count: 8)
+        let n = Int(buf.withUnsafeMutableBufferPointer { ptr -> Int32 in
+            getIOSDevices(ptr.baseAddress, Int32(ptr.count))
+        })
+        var rows: [IOSDeviceRow] = []
+        for i in 0..<n {
+            var d = buf[i]
+            let name = withUnsafePointer(to: &d.name) { ptr in
+                ptr.withMemoryRebound(to: CChar.self, capacity: 80) { String(cString: $0) }
+            }
+            let kind = withUnsafePointer(to: &d.kind) { ptr in
+                ptr.withMemoryRebound(to: CChar.self, capacity: 32) { String(cString: $0) }
+            }
+            rows.append(IOSDeviceRow(
+                name: name,
+                kind: kind,
+                percent: Int(d.percent),
+                isCharging: d.isCharging,
+                fullyCharged: d.fullyCharged,
+                paired: d.paired
+            ))
+        }
+        iosDevices = rows
     }
 
     // MARK: - Load Average / Uptime
