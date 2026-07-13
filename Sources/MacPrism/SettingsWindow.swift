@@ -28,19 +28,21 @@ struct SettingsView: View {
                 .toggleStyle(.checkbox)
             }
 
-            Divider()
+            if AppSettings.quotaFeatureEnabled {
+                Divider()
 
-            HStack {
-                Label("AI 額度顯示", systemImage: "speedometer")
-                Spacer()
-                Picker("", selection: $settings.tokenMenuBarSource) {
-                    ForEach(TokenMenuBarSource.allCases) { source in
-                        Text(source.label).tag(source)
+                HStack {
+                    Label("AI 額度顯示", systemImage: "speedometer")
+                    Spacer()
+                    Picker("", selection: $settings.tokenMenuBarSource) {
+                        ForEach(TokenMenuBarSource.allCases) { source in
+                            Text(source.label).tag(source)
+                        }
                     }
+                    .labelsHidden()
+                    .frame(width: 150)
+                    .disabled(!settings.menuBarItems.contains(.tokenUsage))
                 }
-                .labelsHidden()
-                .frame(width: 150)
-                .disabled(!settings.menuBarItems.contains(.tokenUsage))
             }
 
             Toggle(isOn: $settings.menuBarShowGraph) {
@@ -60,7 +62,7 @@ struct SettingsView: View {
                 .foregroundColor(.secondary)
 
             List {
-                ForEach(settings.panelOrder, id: \.self) { item in
+                ForEach(settings.panelOrder.filter { $0 != .tokenUsage || AppSettings.quotaFeatureEnabled }, id: \.self) { item in
                     HStack {
                         Image(systemName: "line.3.horizontal")
                             .foregroundColor(.secondary)

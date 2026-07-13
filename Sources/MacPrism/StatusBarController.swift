@@ -49,7 +49,7 @@ class StatusBarController: NSObject, NSMenuDelegate {
 
     private func startMonitoring() {
         monitor.update()
-        tokenMonitor.refresh(force: true)
+        if AppSettings.quotaFeatureEnabled { tokenMonitor.refresh(force: true) }
         networkMonitor.refresh(force: true)
         refreshStatusBar()
 
@@ -60,9 +60,11 @@ class StatusBarController: NSObject, NSMenuDelegate {
         }
 
         // AI 額度更新較慢，獨立用 60 秒節奏刷新（Claude API 內部再節流到 5 分鐘）
-        tokenTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            self?.tokenMonitor.refresh()
-            self?.refreshStatusBar()
+        if AppSettings.quotaFeatureEnabled {
+            tokenTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+                self?.tokenMonitor.refresh()
+                self?.refreshStatusBar()
+            }
         }
     }
 
@@ -111,7 +113,7 @@ class StatusBarController: NSObject, NSMenuDelegate {
         if items.contains(.sensors), let temp = monitor.maxTemperature {
             parts.append(String(format: "%.0f°", temp))
         }
-        if items.contains(.tokenUsage),
+        if AppSettings.quotaFeatureEnabled, items.contains(.tokenUsage),
            let text = tokenMonitor.menuBarText(for: settings.tokenMenuBarSource) {
             parts.append(text)
         }
@@ -166,7 +168,7 @@ class StatusBarController: NSObject, NSMenuDelegate {
     }
 
     private func openPopover(_ sender: NSStatusBarButton) {
-        tokenMonitor.refresh()
+        if AppSettings.quotaFeatureEnabled { tokenMonitor.refresh() }
         networkMonitor.refresh()
         monitor.update()   // 開啟瞬間補一次最新數據
         popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)

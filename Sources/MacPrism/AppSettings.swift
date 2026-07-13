@@ -37,7 +37,9 @@ enum StatItem: String, CaseIterable, Identifiable {
     }
 
     /// 不適合放 menu bar 的項目（資料量太大）
-    var canShowInMenuBar: Bool { self != .topProcess }
+    var canShowInMenuBar: Bool {
+        self != .topProcess && (self != .tokenUsage || AppSettings.quotaFeatureEnabled)
+    }
 }
 
 /// menu bar 的「AI 額度」要顯示哪一個 CLI 的剩餘額度
@@ -117,6 +119,10 @@ enum ColorTheme: String, CaseIterable, Identifiable {
 final class AppSettings: ObservableObject {
     static let shared = AppSettings()
 
+    /// Feature flag：AI 額度（quota/credit）功能總開關。關閉時隱藏所有 UI、停用背景輪詢與網路/Keychain 存取，
+    /// 但程式碼保留完整不刪除，之後要恢復只需改回 true。
+    static let quotaFeatureEnabled = false
+
     @Published var menuBarItems: Set<StatItem> {
         didSet { saveSet(menuBarItems, key: Keys.menuBar) }
     }
@@ -158,7 +164,9 @@ final class AppSettings: ObservableObject {
     /// 預設：menu bar 顯示 CPU / 記憶體 / 網路 / 電池；面板依 allCases 順序、全部啟用
     private static let defaultMenuBar: Set<StatItem> = [.cpu, .memory, .network, .battery]
     private static let defaultPanelOrder: [StatItem] = StatItem.allCases
-    private static let defaultPanelEnabled: Set<StatItem> = Set(StatItem.allCases)
+    private static let defaultPanelEnabled: Set<StatItem> = quotaFeatureEnabled
+        ? Set(StatItem.allCases)
+        : Set(StatItem.allCases.filter { $0 != .tokenUsage })
 
     private init() {
         self.menuBarItems = AppSettings.loadSet(key: Keys.menuBar, fallback: AppSettings.defaultMenuBar)

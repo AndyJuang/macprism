@@ -43,7 +43,7 @@ struct ContentView: View {
         case .battery:    if monitor.battery.present { batterySection }
         case .sensors:    sensorsSection
         case .topProcess: topProcessSection
-        case .tokenUsage: tokenUsageSection
+        case .tokenUsage: if AppSettings.quotaFeatureEnabled { tokenUsageSection }
         case .date:       dateSection
         }
     }
