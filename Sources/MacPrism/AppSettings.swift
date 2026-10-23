@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SwiftUI
 
@@ -123,6 +124,24 @@ final class AppSettings: ObservableObject {
     /// 但程式碼保留完整不刪除，之後要恢復只需改回 true。
     static let quotaFeatureEnabled = false
 
+    static let panelWidth: CGFloat         = 360
+    static let defaultPanelHeight: CGFloat = 520
+    static let minPanelHeight: CGFloat     = 300
+    static let panelScreenMargin: CGFloat  = 24
+
+    /// 依狀態列所在螢幕（或主螢幕）的可用高度計算下拉面板最大高度
+    static func maxPanelHeight(for screen: NSScreen? = nil) -> CGFloat {
+        let target = screen ?? NSScreen.main ?? NSScreen.screens.first
+        guard let visibleHeight = target?.visibleFrame.height else {
+            return max(defaultPanelHeight, 900)
+        }
+        return max(minPanelHeight, (visibleHeight - panelScreenMargin).rounded(.down))
+    }
+
+    static func clampPanelHeight(_ height: CGFloat, screen: NSScreen? = nil) -> CGFloat {
+        min(max(height, minPanelHeight), maxPanelHeight(for: screen))
+    }
+
     @Published var menuBarItems: Set<StatItem> {
         didSet { saveSet(menuBarItems, key: Keys.menuBar) }
     }
@@ -151,6 +170,11 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(colorTheme.rawValue, forKey: Keys.colorTheme) }
     }
 
+    /// 下拉面板高度（pt）
+    @Published var panelHeight: CGFloat {
+        didSet { UserDefaults.standard.set(Double(panelHeight), forKey: Keys.panelHeight) }
+    }
+
     private enum Keys {
         static let menuBar      = "macprism.settings.menuBarItems"
         static let panelOrder   = "macprism.settings.panelOrder"
@@ -159,6 +183,7 @@ final class AppSettings: ObservableObject {
         static let tokenSource  = "macprism.settings.tokenMenuBarSource"
         static let menuBarGraph = "macprism.settings.menuBarShowGraph"
         static let colorTheme   = "macprism.settings.colorTheme"
+        static let panelHeight  = "macprism.settings.panelHeight"
     }
 
     /// 預設：menu bar 顯示 CPU / 記憶體 / 網路 / 電池；面板依 allCases 順序、全部啟用
@@ -182,6 +207,10 @@ final class AppSettings: ObservableObject {
 
         let rawTheme = UserDefaults.standard.string(forKey: Keys.colorTheme) ?? ""
         self.colorTheme = ColorTheme(rawValue: rawTheme) ?? .standard
+
+        let savedHeight = UserDefaults.standard.double(forKey: Keys.panelHeight)
+        let initialHeight = savedHeight > 0 ? CGFloat(savedHeight) : AppSettings.defaultPanelHeight
+        self.panelHeight = AppSettings.clampPanelHeight(initialHeight)
     }
 
     func toggleMenuBar(_ item: StatItem) {
@@ -205,6 +234,7 @@ final class AppSettings: ObservableObject {
         tokenMenuBarSource = .lowest
         menuBarShowGraph   = false
         colorTheme         = .standard
+        panelHeight        = AppSettings.clampPanelHeight(AppSettings.defaultPanelHeight)
     }
 
     // MARK: - Persistence

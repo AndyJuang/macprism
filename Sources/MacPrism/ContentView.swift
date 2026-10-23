@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct ContentView: View {
@@ -5,8 +6,11 @@ struct ContentView: View {
     @ObservedObject var tokenMonitor: TokenUsageMonitor
     @ObservedObject var networkMonitor: NetworkInfoMonitor
     @ObservedObject var settings: AppSettings
+    var onResizeHeight: ((CGFloat, Bool) -> Void)? = nil
     @State private var topMode: TopMode = .cpu
     @State private var inspectedCore: CoreInspect?
+    @State private var isHandleActive = false
+    @State private var dragStartHeight: CGFloat? = nil
 
     /// 被雙擊的核心編號（1-based）；用於彈出 Top 行程小面板
     struct CoreInspect: Identifiable { let id: Int }
@@ -28,8 +32,10 @@ struct ContentView: View {
                 }
                 .padding(12)
             }
+            Divider()
+            resizeHandle
         }
-        .frame(width: 360, height: 520)
+        .frame(width: AppSettings.panelWidth, height: settings.panelHeight)
     }
 
     @ViewBuilder
@@ -82,6 +88,64 @@ struct ContentView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+    }
+
+    // MARK: - Bottom Resize Handle
+
+    private var resizeHandle: some View {
+        ZStack {
+            Rectangle()
+                .fill(Color.primary.opacity(isHandleActive ? 0.08 : 0.025))
+
+            VStack(spacing: 2.5) {
+                Capsule()
+                    .fill(handleGripFill)
+                    .frame(width: isHandleActive ? 52 : 44, height: 4)
+                Capsule()
+                    .fill(handleGripFill)
+                    .frame(width: isHandleActive ? 36 : 28, height: 2.5)
+            }
+            .animation(.easeOut(duration: 0.12), value: isHandleActive)
+        }
+        .frame(maxWidth: .infinity)
+        .frame(height: 18)
+        .contentShape(Rectangle())
+        .overlay(
+            ResizeHandleRepresentable(
+                onActiveChange: { active in
+                    isHandleActive = active
+                },
+                onDragStart: {
+                    dragStartHeight = settings.panelHeight
+                },
+                onDragDelta: { deltaY in
+                    let base = dragStartHeight ?? settings.panelHeight
+                    applyHeight(base + deltaY, isDragging: true)
+                },
+                onDragEnd: { deltaY in
+                    let base = dragStartHeight ?? settings.panelHeight
+                    applyHeight(base + deltaY, isDragging: false)
+                    dragStartHeight = nil
+                }
+            )
+        )
+    }
+
+    private var handleGripFill: AnyShapeStyle {
+        if isHandleActive {
+            return theme == .rainbow
+                ? AnyShapeStyle(ColorTheme.prismGradient)
+                : AnyShapeStyle(Color.primary.opacity(0.85))
+        }
+        return AnyShapeStyle(Color.secondary.opacity(0.55))
+    }
+
+    private func applyHeight(_ proposedHeight: CGFloat, isDragging: Bool) {
+        if let onResizeHeight {
+            onResizeHeight(proposedHeight, isDragging)
+        } else {
+            settings.panelHeight = AppSettings.clampPanelHeight(proposedHeight).rounded()
+        }
     }
 
     // MARK: - CPU
@@ -1166,6 +1230,134 @@ struct NetStat: View {
             }
         }
         .frame(maxWidth: .infinity)
+    }
+}
+
+// MARK: - Bottom Resize Handle NSView
+
+private struct ResizeHandleRepresentable: NSViewRepresentable {
+    var onActiveChange: (Bool) -> Void
+    var onDragStart: () -> Void
+    var onDragDelta: (CGFloat) -> Void
+    var onDragEnd: (CGFloat) -> Void
+
+    func makeNSView(context: Context) -> ResizeHandleNSView {
+        let view = ResizeHandleNSView()
+        view.toolTip = "上下拖曳調整面板高度"
+        view.onActiveChange = onActiveChange
+        view.onDragStart = onDragStart
+        view.onDragDelta = onDragDelta
+        view.onDragEnd = onDragEnd
+        return view
+    }
+
+    func updateNSView(_ nsView: ResizeHandleNSView, context: Context) {
+        nsView.onActiveChange = onActiveChange
+        nsView.onDragStart = onDragStart
+        nsView.onDragDelta = onDragDelta
+        nsView.onDragEnd = onDragEnd
+    }
+}
+
+private final class ResizeHandleNSView: NSView {
+    var onActiveChange: ((Bool) -> Void)?
+    var onDragStart: (() -> Void)?
+    var onDragDelta: ((CGFloat) -> Void)?
+    var onDragEnd: ((CGFloat) -> Void)?
+
+    private var trackingArea: NSTrackingArea?
+    private var isHovering = false
+    private var isDragging = false
+    private var isCursorPushed = false
+    private var dragStartScreenY: CGFloat = 0
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .resizeUpDown)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let options: NSTrackingArea.Options = [
+            .mouseEnteredAndExited,
+            .cursorUpdate,
+            .activeAlways,
+            .inVisibleRect
+        ]
+        let area = NSTrackingArea(rect: bounds, options: options, owner: self, userInfo: nil)
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        NSCursor.resizeUpDown.set()
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovering = true
+        syncState()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovering = false
+        syncState()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        isDragging = true
+        dragStartScreenY = NSEvent.mouseLocation.y
+        syncState()
+        onDragStart?()
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard isDragging else { return }
+        // 螢幕座標 Y 軸向上為正；向下拖曳代表拉高面板（delta > 0）
+        let deltaY = dragStartScreenY - NSEvent.mouseLocation.y
+        NSCursor.resizeUpDown.set()
+        onDragDelta?(deltaY)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard isDragging else { return }
+        let deltaY = dragStartScreenY - NSEvent.mouseLocation.y
+        onDragEnd?(deltaY)
+        isDragging = false
+        let mouseInWindow = window?.mouseLocationOutsideOfEventStream ?? event.locationInWindow
+        let localPoint = convert(mouseInWindow, from: nil)
+        isHovering = bounds.contains(localPoint)
+        syncState()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil {
+            isHovering = false
+            isDragging = false
+            syncState()
+        }
+    }
+
+    private func syncState() {
+        let active = isHovering || isDragging
+        if active {
+            if !isCursorPushed {
+                NSCursor.resizeUpDown.push()
+                isCursorPushed = true
+            } else {
+                NSCursor.resizeUpDown.set()
+            }
+        } else {
+            if isCursorPushed {
+                NSCursor.pop()
+                isCursorPushed = false
+            }
+        }
+        onActiveChange?(active)
     }
 }
 
