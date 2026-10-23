@@ -38,11 +38,27 @@ class StatusBarController: NSObject, NSMenuDelegate {
     }
 
     private func setupPopover() {
-        let content = NSHostingController(rootView: ContentView(monitor: monitor, tokenMonitor: tokenMonitor, networkMonitor: networkMonitor, settings: settings))
-        content.view.frame = NSRect(x: 0, y: 0, width: 360, height: 520)
+        let initialHeight = clampedPanelHeight(settings.panelHeight)
+        if settings.panelHeight != initialHeight {
+            settings.panelHeight = initialHeight
+        }
+
+        let rootView = ContentView(
+            monitor: monitor,
+            tokenMonitor: tokenMonitor,
+            networkMonitor: networkMonitor,
+            settings: settings,
+            onResizeHeight: { [weak self] newHeight, isDragging in
+                self?.applyPopoverHeight(newHeight, isDragging: isDragging)
+            }
+        )
+        let content = NSHostingController(rootView: rootView)
+        content.sizingOptions = []
+        let size = NSSize(width: AppSettings.panelWidth, height: initialHeight)
+        content.view.frame = NSRect(origin: .zero, size: size)
 
         popover.contentViewController = content
-        popover.contentSize = NSSize(width: 360, height: 520)
+        popover.contentSize = size
         popover.behavior    = .transient
         popover.animates    = true
     }
@@ -83,6 +99,21 @@ class StatusBarController: NSObject, NSMenuDelegate {
         settings.$menuBarShowGraph
             .dropFirst()
             .sink { [weak self] _ in self?.refreshStatusBar() }
+            .store(in: &cancellables)
+
+        settings.$panelHeight
+            .dropFirst()
+            .sink { [weak self] newHeight in
+                guard let self = self else { return }
+                let clamped = self.clampedPanelHeight(newHeight)
+                let size = NSSize(width: AppSettings.panelWidth, height: clamped)
+                if self.popover.contentViewController?.view.frame.size != size {
+                    self.popover.contentViewController?.view.frame.size = size
+                }
+                if self.popover.contentSize != size {
+                    self.popover.contentSize = size
+                }
+            }
             .store(in: &cancellables)
     }
 
@@ -171,9 +202,36 @@ class StatusBarController: NSObject, NSMenuDelegate {
         if AppSettings.quotaFeatureEnabled { tokenMonitor.refresh() }
         networkMonitor.refresh()
         monitor.update()   // 開啟瞬間補一次最新數據
+        applyPopoverHeight(settings.panelHeight, isDragging: false)
         popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
         eventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
             self?.closePopover()
+        }
+    }
+
+    private func statusBarScreen() -> NSScreen? {
+        statusItem.button?.window?.screen
+            ?? popover.contentViewController?.view.window?.screen
+            ?? NSScreen.main
+            ?? NSScreen.screens.first
+    }
+
+    private func clampedPanelHeight(_ height: CGFloat) -> CGFloat {
+        AppSettings.clampPanelHeight(height, screen: statusBarScreen()).rounded()
+    }
+
+    private func applyPopoverHeight(_ height: CGFloat, isDragging: Bool) {
+        let clamped = clampedPanelHeight(height)
+        popover.animates = !isDragging
+        let size = NSSize(width: AppSettings.panelWidth, height: clamped)
+        if popover.contentViewController?.view.frame.size != size {
+            popover.contentViewController?.view.frame.size = size
+        }
+        if popover.contentSize != size {
+            popover.contentSize = size
+        }
+        if settings.panelHeight != clamped {
+            settings.panelHeight = clamped
         }
     }
 
